@@ -40,8 +40,12 @@ The terms:
    code's structure (its file, composition, its package's folder).
 2. **The owner's interface:** its public attributes, methods and
    properties; the parts it hands out (a public attribute that holds one,
-   a public method or property that returns one or is named after it); and
-   the objects its public methods return (`shop.sales()` returning `Sale`s).
+   a public method or property that returns one or is named after it); the
+   objects its public methods return (`shop.sales()` returning `Sale`s); the
+   names its own module or its package's `__init__.py` imports from a part
+   (`from ._stock import count`: what is in the owner's namespace is
+   public); and a function the caller was handed (a callback its code does
+   not name).
 3. **Public path:** no name from the caller's import or reference to the
    member starts with an underscore (dunders such as `__init__` are public).
 4. **Python container of a private name:** the module that defines it, the
@@ -51,9 +55,9 @@ The terms:
 | Colour | When | Example |
 |---|---|---|
 | Red, *private access* | a name on the path starts with an underscore and the caller is outside its Python container | `shop._audit()`, `from shop._stock import count` from outside `shop/` |
-| Amber, *owner bypass* | the path is public, but it reaches a part its owner does not hand out | `shop.ledger.reset()` when Shop does not hand out its ledger, a function re-exported by the owner's package |
+| Amber, *owner bypass* | the path is public, but it reaches a part its owner does not hand out | `shop.ledger.reset()` when Shop does not hand out its ledger |
 | Amber, *shared* | a datum written by more than one owner, or another owner's data reached directly | two classes writing the same `out/` folder |
-| Blue | the caller goes through the owner's interface, or uses a part the owner handed out | `shop.sales()` then `sale.total()` |
+| Blue | the caller goes through the owner's interface, or uses a part the owner handed out | `shop.sales()` then `sale.total()`; `shop.count()` re-exported by Shop's package |
 
 Red is the code breaking its own visibility rules. Amber is a design
 decision left open: route the call through the owner, have the owner hand

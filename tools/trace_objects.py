@@ -231,6 +231,42 @@ def private_reaches(root, objs):
     return out
 
 
+def reexports(root, objs, owner_of_file, primary_of_dir):
+    """{(part file, owner class id): {name}}: the names an owner's own module,
+    or its package's `__init__.py`, imports at module level from one of its
+    parts (`from ._stock import count`): what the owner exposes in its
+    module's namespace is its interface."""
+    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+
+    def dotted(p):
+        parts = list(p.with_suffix("").parts)
+        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+    mod_file = {dotted(p): str(p) for p in files}
+    out = {}
+    for p in files:
+        owner = owner_of_file(str(p))[0]
+        if owner is None or not (objs[owner]["file"] == str(p) or
+                                 (p.name == "__init__.py" and primary_of_dir(p.parent) == owner)):
+            continue
+        try:
+            t = ast.parse(p.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        here = dotted(p)
+        pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
+        for n in t.body:
+            if not isinstance(n, ast.ImportFrom):
+                continue
+            base = n.module or ""
+            if n.level:
+                up = pkg.split(".")[: len(pkg.split(".")) - (n.level - 1)]
+                base = ".".join(up + ([n.module] if n.module else []))
+            if base in mod_file:
+                out.setdefault((mod_file[base], owner), set()).update(a.asname or a.name for a in n.names)
+    return out
+
+
 def owners(root, objs):
     """{class id: owner class id} for a class created and kept by exactly one
     other class (`self.x = Other(...)` in its body, also inside `a or b` and
@@ -659,22 +695,41 @@ def spec_of(objs, edges, root, concepts=None):
         bases = facts.get(f"{f}:{cname}", {}).get("bases", []) if cname else []
         return f == dfile or dcls.split(".")[-1] in bases
 
+    reexported = reexports(root, objs, owner_of_file, primary_of_dir)
+
+    def text_of(f):
+        try:
+            return Path(f).read_text(errors="replace")
+        except OSError:
+            return ""
+
+    def through_owner(e):
+        """A reach the owner allows: an object it hands out, names its own
+        module or package re-exports from the part (`from ._stock import
+        count` in the owner's file), or a function the caller was handed
+        (its code names none of the members: a callback)."""
+        if handed(e["to"]):
+            return True
+        tfile = objs.get(e["to"], {"file": e["to"]})["file"]
+        owner = top(box.get(e["to"], e["to"]))
+        if all(m in reexported.get((tfile, owner), ()) for m in e["members"]):
+            return True
+        text = text_of(objs.get(e["from"], {"file": e["from"]})["file"])
+        return not any(re.search(r"\b" + re.escape(m) + r"\b", text) for m in e["members"] if not m.startswith("__"))
+
     red, open_pairs = {}, set()
     for e in edges:
         a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
         if a == b:
             continue
-        if not handed(e["to"]):
+        if not through_owner(e):
             open_pairs.add((a, b))
         ffile = objs.get(e["from"], {"file": e["from"]})["file"]
         tfile = objs.get(e["to"], {"file": e["to"]})["file"]
         priv = [m for m in e["members"] if _private(m)]
         if not priv:
             continue
-        try:
-            text = Path(ffile).read_text(errors="replace")
-        except OSError:
-            text = ""
+        text = text_of(ffile)
         cname = objs[e["from"]]["name"].split(".")[0] if objs.get(e["from"], {}).get("kind") == "class" else None
         kind = "class" if objs.get(e["to"], {}).get("kind") == "class" else "module"
         for m in priv:                        # a private name the caller's code names: not a callback it was handed
@@ -751,7 +806,7 @@ def spec_of(objs, edges, root, concepts=None):
             continue
         owner = top(b)
         users = set()
-        users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b and not handed(e["to"])}
+        users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b and not through_owner(e)}
         if b not in objs:
             users |= {box_of_use(u) for u in imp.get(b, set())}
         out = sorted(u for u in users if top(u) != owner) if not is_exposed(b) else []

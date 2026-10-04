@@ -89,8 +89,9 @@ not seen.
 through the owner (information hiding, the aggregate root, the Law of
 Demeter; see METHOD.md). What the owner makes public is its interface: its
 public members, the parts it hands out (`self.door = Door()`, `def
-window(self)`, a method named after the part's class) and the objects its
-public methods return.
+window(self)`, a method named after the part's class), the objects its
+public methods return, and the names its module or package re-exports from
+a part (`from ._impl import go`).
 
 **Arrows:** all legitimate calls and accesses between two owners are one
 blue arrow between the owners themselves, whichever of their parts make or

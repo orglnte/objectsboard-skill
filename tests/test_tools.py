@@ -607,7 +607,7 @@ def test_edge_colours_private_red_owner_bypass_amber_interface_blue(tmp_path):
     c = _colours(_spec(tmp_path, SHOP, edges))
     assert c[("lib/till.py:Till", "lib/shop/shop.py:Shop")] == "blue"    # its public method, and the Sales it hands out
     assert c[("lib/till.py:Till", "lib/shop/ledger.py")] == "amber"     # ledger.reset: public, but Shop does not hand it out
-    assert c[("lib/till.py:Till", "lib/shop/_stock.py")] == "amber"     # re-exported by the package: public, not Shop's
+    assert ("lib/till.py:Till", "lib/shop/_stock.py") not in c          # re-exported by Shop's package: Shop's interface
     assert c[("lib/back.py", "lib/shop/_stock.py")] == "red"            # imported through the private module
     assert c[("lib/back.py", "lib/shop/shop.py:Shop")] == "red"         # a private method, named in its code
     assert c.get(("lib/hook.py", "lib/shop/shop.py:Shop"), "blue") == "blue"   # handed a private method as a callback

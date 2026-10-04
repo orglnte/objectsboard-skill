@@ -8,7 +8,9 @@ into the object.
 
 TARGET is a module (`path/to/mod.py`: every function in it, methods
 included), a class (`path/to/mod.py:Name`: its methods and properties) or a
-function (`path/to/mod.py:func`). Needs Python 3.11+ (code qualnames).
+function (`path/to/mod.py:func`). Run it with the project's own interpreter
+(it imports the project and needs pytest); caller names are fully qualified
+on Python 3.11+.
 
 Run it from the directory the suite is normally run from. It runs pytest in
 this process with a profiler that records each call to one of the target's

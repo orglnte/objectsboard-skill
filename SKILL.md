@@ -28,6 +28,15 @@ It covers:
    and dark concepts (a concept whose effect surprises its user, or that
    acts silently) and colliding names.
 
+## Requirements
+
+1. Python 3.9+ and its standard library; nothing to install.
+2. `tools/trace_uses.py` runs the project's test suite in its own process,
+   so run it with the project's own interpreter, from the project root, e.g.
+   `.venv/bin/python <skill>/tools/trace_uses.py --target ... -- tests -q`:
+   that interpreter needs pytest and the project's dependencies. Caller
+   names are fully qualified on Python 3.11+.
+
 ## Input
 
 A concept map: one row per concept with a short description and the objects
@@ -59,7 +68,8 @@ Without a map, start from the object the user's question is about.
    {}}`. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions), seed the result, and
-   let the user duplicate and drag it into the target encapsulation. Read
+   let the user duplicate and drag it into the target encapsulation. No
+   arrows from a container to its own parts: nesting is the ownership. Read
    their diagram back before proposing code.
 8. Refactor toward the target one owner at a time, suites green per commit,
    and redraw the board after each step.

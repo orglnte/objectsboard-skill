@@ -87,8 +87,8 @@ decided.
    attributes or properties with `--attr`), so say so on the page.
 2. **`file_contracts.py`**: every quoted mention of the given file names,
    with two lines of context.
-3. **`trace_uses.py`**: runs the test suite (pytest, in process, Python
-   3.11+) with a profiler and records every call into the target's
+3. **`trace_uses.py`**: runs the test suite (pytest, in process, under the
+   project's own interpreter) with a profiler and records every call into the target's
    functions and the caller outside it: the call graph into the target.
    `--diff data.json` lists, per file, the members seen only at run time
    (missed by the static scan) and those no test runs.

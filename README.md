@@ -19,6 +19,14 @@ board apply to any language.
 What each tool cannot see is listed in `METHOD.md`, "What the tools cannot
 see".
 
+## Requirements
+
+1. Python 3.9+ and its standard library; nothing to install.
+2. `tools/trace_uses.py` imports the project and runs its tests, so run it
+   with the project's own interpreter from the project root (for example
+   `.venv/bin/python ~/code/objectsboard-skill/tools/trace_uses.py ...`);
+   that interpreter needs pytest and the project's dependencies.
+
 ## Install
 
 ```sh

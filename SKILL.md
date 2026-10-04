@@ -87,7 +87,12 @@ not seen.
 
 **The criterion:** one owner per part and per datum; everything else goes
 through the owner (information hiding, the aggregate root, the Law of
-Demeter; see METHOD.md).
+Demeter; see METHOD.md). What the owner makes public is its interface: a
+part it exposes through a public attribute, method or property (`self.door
+= Door()`, `def window(self)`, a method named after the part's class) is
+reached through the owner when a caller uses it, not around it. Python has
+no access control, so a public part is public; to keep a part to itself,
+the owner does not expose it.
 
 **Arrows:** all legitimate calls and accesses between two owners are one
 arrow between the owners themselves, whichever of their parts make or
@@ -97,7 +102,8 @@ makes it.
 **Usage only shows what is wrong, in the warning colour:**
 
 1. **Bypass arrows:** an arrow from outside an owner straight into one of
-   its parts (a module, a nested class, its data) goes around the owner.
+   its parts that it does not expose (a module, a nested class it keeps
+   private, its data) goes around the owner.
    `trace_objects.py --worklist FILE` ranks the bypassed parts, the most
    bypassed first, each with its call sites (file:line).
 2. **Flagged boxes:** a part called directly from outside its owner; a

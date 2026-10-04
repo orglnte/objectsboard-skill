@@ -33,6 +33,10 @@ On the board, all legitimate traffic between two owners is one arrow between
 the owners themselves; each bypass is its own red arrow from the exact part,
 since each is one fix.
 
+What an owner makes public is its interface: a part it exposes through a
+public attribute, method or property is reached through it, and calls into
+that part are not red. A part it keeps private and is reached anyway is.
+
 It is three established rules seen together:
 
 1. **Information hiding:** an owner hides its design decisions (its data's

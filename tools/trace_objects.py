@@ -177,6 +177,60 @@ def owners(root, objs):
     return {k: next(iter(v)) for k, v in kept.items() if len(v) == 1}
 
 
+def exposed(root, objs):
+    """{(owner class id, class name)}: the classes an owner exposes, through a
+    public attribute (`self.x = Other(...)`, directly or through a project
+    factory) or a public method or property that returns one, or is named
+    after it (`def workspace` -> Workspace). What is public is the owner's
+    interface: a call into an exposed part through it goes through the owner."""
+    by_name = {}
+    for oid, o in objs.items():
+        if o["kind"] == "class":
+            by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
+    snake = {re.sub(r"(?<!^)(?=[A-Z])", "_", n).lower(): n for n in by_name}
+    trees = []
+    for p in sorted(Path(root).rglob("*.py")):
+        if "__pycache__" in p.parts:
+            continue
+        try:
+            trees.append((p, ast.parse(p.read_text())))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+    makes = {}
+    for _, t in trees:
+        for fn in [n for n in ast.walk(t) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            for r in [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]:
+                makes.setdefault(fn.name, set()).update(
+                    nm for c in _top_calls(r.value) if (nm := _called_name(c)) in by_name)
+
+    def built(expr):
+        out = set()
+        for call in [x for x in ast.walk(expr) if isinstance(x, ast.Call)]:
+            name = _called_name(call)
+            out |= {name} if name in by_name else makes.get(name, set())
+        return out
+
+    out = set()
+    for p, t in trees:
+        for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
+            owner = f"{p}:{c.name}"
+            if owner not in objs:
+                continue
+            for n in ast.walk(c):
+                if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+                    targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                    if any(isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "self"
+                           and not x.attr.startswith("_") for x in targets):
+                        out |= {(owner, nm) for nm in built(n.value)}
+            for f in c.body:
+                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and not f.name.startswith("_"):
+                    for r in [n for n in ast.walk(f) if isinstance(n, ast.Return) and n.value is not None]:
+                        out |= {(owner, nm) for nm in built(r.value)}
+                    if f.name in snake:
+                        out.add((owner, snake[f.name]))
+    return out
+
+
 def class_facts(root):
     """Per class id: its base names, and whether it is a value class (a
     dataclass, NamedTuple, Enum or TypedDict, or a class with no public
@@ -317,7 +371,9 @@ def spec_of(objs, edges, root, concepts=None):
        `return Other(...)` builds it); a subclass folds into its base.
     4. Everything else is external.
     5. A use of an owned module or class from outside its owner is a bypass,
-       listed as a move. One arrow per pair of boxes.
+       listed as a move, unless the owner exposes it (a public attribute,
+       method or property: what is public is the owner's interface). One
+       arrow per pair of boxes.
 
     Data (the map's resources table names it and how code reaches it): its
     owner is its only writer in the code (a write anywhere in the function
@@ -433,6 +489,17 @@ def spec_of(objs, edges, root, concepts=None):
             b = parent.get(b)
         return False
 
+    shown = exposed(root, objs)
+
+    def is_exposed(b):
+        """b, and each box holding it, is a class its holder exposes."""
+        while b in parent:
+            if b not in objs or objs[b]["kind"] != "class" or \
+                    (parent[b], objs[b]["name"].split(".")[-1]) not in shown:
+                return False
+            b = parent[b]
+        return True
+
     used = {x for pair in pairs for x in pair}
     frontier = set(used)
     while frontier:
@@ -489,7 +556,7 @@ def spec_of(objs, edges, root, concepts=None):
         else:
             users |= {box_of_use(u) for u in imp.get(b, set())}
             users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b}
-        out = sorted(u for u in users if top(u) != owner)
+        out = sorted(u for u in users if top(u) != owner) if not is_exposed(b) else []
         if out:
             moves[b] = {"module": b, "into": owner, "other_users": out,
                         "why": f"belongs to {objs[owner]['name']} (rule {owner_of_file(objs.get(b, {'file': b})['file'])[1]}); "
@@ -601,7 +668,7 @@ def spec_of(objs, edges, root, concepts=None):
             n["flag"] = "doubt: " + "; ".join(doubts) + (" — " + n["flag"] if n.get("flag") else "")
     for e in E:
         b = e["to"]
-        if b in parent and not within(top(b), e["from"]):
+        if b in parent and not within(top(b), e["from"]) and not is_exposed(b):
             e["flag"] = "bypass: reaches " + N[b]["name"] + " directly, not through " + objs[top(b)]["name"]
     # every legitimate call or access between two owners is one arrow between
     # the owners themselves; a bypass keeps its own arrow, from the exact part

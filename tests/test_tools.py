@@ -521,3 +521,38 @@ def test_a_class_no_one_keeps_nests_in_its_packages_class_and_a_write_counts_in_
     N = {n["id"]: n for n in s["nodes"]}
     assert N["lib/report/table.py:Table"]["parent"] == "lib/report/report.py:Report"   # report/ names Report
     assert N["resource:out/"]["note"].startswith("no single owner")    # util's write is two lines below the path
+
+
+def test_a_part_its_owner_exposes_is_reached_through_the_owner_not_around_it(tmp_path):
+    import trace_objects
+    files = {
+        "lib/__init__.py": "",
+        "lib/house/__init__.py": "",
+        "lib/house/house.py": ("from lib.house.door import Door\nfrom lib.house.safe import Safe\n"
+                               "from lib.house.window import Window\n\n\nclass House:\n"
+                               "    def __init__(self):\n        self.door = Door()\n        self._safe = Safe()\n"
+                               "        self._w = Window()\n\n    @property\n    def window(self):\n"
+                               "        return self._w\n\n    def open(self):\n        return self.door.open()\n"),
+        "lib/house/door.py": "class Door:\n    def open(self):\n        return 1\n",
+        "lib/house/safe.py": "class Safe:\n    def open(self):\n        return 2\n",
+        "lib/house/window.py": "class Window:\n    def open(self):\n        return 3\n",
+        "lib/guest.py": "def visit(h):\n    return h.door.open(), h._safe.open(), h.window.open()\n",
+    }
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    cwd = Path.cwd()
+    edges = [{"from": "lib/guest.py", "to": f"lib/house/{m}.py:{c}", "members": ["open"]}
+             for m, c in (("door", "Door"), ("safe", "Safe"), ("window", "Window"))]
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        s = trace_objects.spec_of(objs, edges, "lib")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert {N[i]["parent"] for i in ("lib/house/door.py:Door", "lib/house/safe.py:Safe", "lib/house/window.py:Window")} \
+        == {"lib/house/house.py:House"}
+    red = {e["to"].split(":")[-1] for e in s["edges"] if e.get("flag")}
+    assert red == {"Safe"}            # the door and the window are public; the safe is not

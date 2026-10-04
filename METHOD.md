@@ -213,7 +213,9 @@ cannot see is not evidence that nothing is there.
    slice.
 6. **Whole codebase (the objects representation):** concept classes as
    boxes, one arrow per pair, modules no class encapsulates as external
-   boxes. Placement from structure and the concept map: the map's
+   boxes, and the resources (data) from the map's Resources table, with an
+   arrow from every box whose code reaches one directly (a bypass unless it
+   is the owner). Placement from structure and the concept map: the map's
    consistent declarations, then the file's concept class, then the
    package's (named after its folder, never the root), composition and
    subclassing between classes; usage never moves a box. Usage flags, in the

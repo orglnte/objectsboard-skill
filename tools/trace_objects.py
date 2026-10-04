@@ -230,6 +230,29 @@ def map_rows(map_file):
     return rows
 
 
+def resource_rows(map_file):
+    """[(name, kind, owner class name or None, [regex])] from the concept
+    map's resources table (columns Resource | Kind | Owner | Reached by)."""
+    rows, on = [], False
+    for line in Path(map_file).read_text().splitlines():
+        cells = [c.strip() for c in line.split("|")]
+        if line.startswith("|") and len(cells) >= 6 and cells[1] == "Resource" and cells[4].startswith("Reached"):
+            on = True
+            continue
+        if on and line.startswith("|") and len(cells) >= 6:
+            if set(cells[1]) <= set("-: "):
+                continue
+            owner = re.findall(r"`([^`]+)`", cells[3])
+            rows.append((cells[1].replace("`", ""), cells[2], owner[0] if owner else None,
+                         re.findall(r"`([^`]+)`", cells[4])))
+        elif on and not line.startswith("|"):
+            on = False
+    return rows
+
+
+WRITES = re.compile(r"write_text|write_bytes|\.write\(|mkdir|rename|unlink|touch|\.save\(|open\([^)]*[\"'][wa]")
+
+
 def concept_classes(map_file, objs):
     """The classes the concept map names in its Objects column."""
     names = {n.split(".")[0] if n[:1].isupper() else n for row in map_rows(map_file)
@@ -463,6 +486,62 @@ def spec_of(objs, edges, root, concepts=None):
             p = Path(n["id"])
             if any(primary_of_dir(d) for d in p.parents if d != rootp and rootp in d.parents):
                 n["flag"] = f"misplaced: in {p.parent}/ but no class owns it"
+    # resources (data): one box each, an arrow from every box whose code
+    # reaches it directly; from anyone but its owner, the arrow is a bypass
+    res_rows = resource_rows(concepts) if concepts else []
+    if res_rows:
+        cls_ids = {objs[k]["name"].split(".")[-1]: k for k in keep}
+        N = {n["id"]: n for n in nodes}
+        hits = {}
+        for pth in sorted(rootp.rglob("*.py")):
+            if "__pycache__" in pth.parts:
+                continue
+            try:
+                text = pth.read_text()
+                tree = ast.parse(text)
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            spans = [(c.lineno, c.end_lineno, c.name) for c in ast.walk(tree) if isinstance(c, ast.ClassDef)]
+            for ln, line in enumerate(text.splitlines(), 1):
+                if line.strip().startswith("#"):
+                    continue
+                for ri, (rname, rkind, rowner, pats) in enumerate(res_rows):
+                    for pat in pats:
+                        if re.search(pat, line):
+                            inner = [c for c in spans if c[0] <= ln <= c[1]]
+                            cname = min(inner, key=lambda c: c[1] - c[0])[2] if inner else None
+                            src = box.get(f"{pth}:{cname}") if cname and f"{pth}:{cname}" in box else box.get(str(pth), str(pth))
+                            h = hits.setdefault((src, ri), {"write": False, "file": str(pth), "pattern": pat, "names": []})
+                            h["write"] |= bool(WRITES.search(line))
+                            short = pat.replace("\\", "").strip('/ "').strip('"')
+                            if short not in h["names"]:
+                                h["names"].append(short)
+                            break
+        for ri, (rname, rkind, rowner, pats) in enumerate(res_rows):
+            if not any(k[1] == ri for k in hits):
+                continue
+            rid = f"resource:{rname}"
+            owner_id = cls_ids.get(rowner) if rowner else None
+            nodes.append({"id": rid, "name": rname, "kind": rkind if rkind in ("folder", "file") else "external",
+                          "parent": None, "note": f"owner: {rowner}" if rowner else "no owner"})
+        N = {n["id"]: n for n in nodes}
+        for (src, ri), h in sorted(hits.items(), key=lambda kv: (kv[0][1], str(kv[0][0]))):
+            rname, rkind, rowner, pats = res_rows[ri]
+            if src not in N:                  # a box that only reaches data: draw it where it belongs
+                o = objs.get(src, {"name": Path(src).stem, "file": src, "kind": "module"})
+                f = Path(o["file"])
+                nodes.append({"id": src, "name": o["name"] if o.get("kind") == "class" else
+                              ((str(f.parent) + "/") if f.name == "__init__.py" else f.name),
+                              "kind": "object" if o.get("kind") == "class" else ("module" if src in parent else "external"),
+                              "parent": parent.get(src), "note": o["file"]})
+                N[src] = nodes[-1]
+            owner_id = cls_ids.get(rowner) if rowner else None
+            label = " · ".join(h["names"][:3]) + (f"  (+{len(h['names']) - 3})" if len(h["names"]) > 3 else "")
+            e = {"from": src, "to": f"resource:{rname}", "kind": "writes" if h["write"] else "reads", "label": label,
+                 "proof": [{"file": h["file"], "pattern": h["pattern"]}]}
+            if owner_id and top(src) != owner_id:
+                e["flag"] = f"bypass: reaches {rowner}'s data directly"
+            E.append(e)
     conflicts = getattr(declared, "conflicts", {}) if concepts else {}
     for n in nodes:
         f = n["note"].split("  ")[0] if n["id"] not in objs or objs[n["id"]]["kind"] == "module" else None

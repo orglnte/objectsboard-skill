@@ -42,8 +42,13 @@ It covers:
 When the user wants to see everything, draw the objects representation:
 `tools/trace_objects.py --concepts <concept map> --spec ...`. Boxes are the
 classes that encapsulate a concept (the map's Objects column), one arrow
-per pair of boxes that call each other, and modules no class encapsulates
-as external boxes.
+per pair of boxes that call each other, modules no class encapsulates as
+external boxes, and the **resources (data)**: the files, folders and
+external systems the objects keep their data in or drive, from the map's
+Resources table (Resource | Kind | Owner | Reached by: the code patterns
+that reach it directly, such as a path joined to its name). Each box whose
+code reaches a resource gets an arrow to it; from anyone but its owner, the
+arrow is a bypass.
 
 **Placement comes from structure and the concept map, never from usage**
 (the first rule that matches wins):

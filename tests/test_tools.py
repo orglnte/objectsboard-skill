@@ -242,15 +242,19 @@ def fmt(x):
     return str(x)
 ''',
     "lib/util.py": '''
+from pathlib import Path
 from lib.report import fmt
 
 
 def line():
+    (Path(".") / "out").mkdir(exist_ok=True)
     return fmt.fmt(2)
 ''',
 }
 MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"
-       "| Shape | a shape | - | `Shape` | geometry |\n| Report | output | - | `Report` | output |\n")
+       "| Shape | a shape | - | `Shape` | geometry |\n| Report | output | - | `Report` | output |\n\n"
+       "| Resource | Kind | Owner | Reached by |\n|---|---|---|---|\n"
+       "| `out/` | folder | `Report` | `/ \"out\"` |\n")
 
 
 def test_objects_representation_rules(tmp_path):
@@ -277,10 +281,12 @@ def test_objects_representation_rules(tmp_path):
     assert N["lib/util.py"]["kind"] == "external"                              # the root folder owns nothing
     assert [(m["into"], m["other_users"]) for m in s["moves"] if m["module"] == "lib/report/fmt.py"] == [
         ("lib/report/report.py:Report", ["lib/util.py"])]                       # util goes around Report
-    assert not [n for n in s["nodes"] if n["kind"] == "folder"]
+    assert [n["kind"] for n in s["nodes"] if n["id"] == "resource:out/"] == ["folder"]
+    res = [e for e in s["edges"] if e["to"] == "resource:out/"]
+    assert [(e["from"], e["kind"], bool(e.get("flag"))) for e in res] == [("lib/util.py", "writes", True)]
     assert "lib/util.py" in N["lib/report/fmt.py"]["flag"] or "util.py" in N["lib/report/fmt.py"]["flag"]
     flagged = [(e["from"], e["to"]) for e in s["edges"] if e.get("flag")]
-    assert flagged == [("lib/util.py", "lib/report/fmt.py")]                   # the arrow around Report
+    assert ("lib/util.py", "lib/report/fmt.py") in flagged                   # the arrow around Report
 
 
 def test_build_nudges_a_kept_box_a_grown_neighbour_now_covers():

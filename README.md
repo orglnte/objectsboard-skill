@@ -1,10 +1,12 @@
 # objectsboard
 
-A Claude Code skill that translates a codebase's concepts into its actual
-objects. It takes a concept map (what the software is for), reviews one
-object at a time (its whole interface, every outside caller, everything that
-reaches its files without it), draws the current state on a live board and
-lets you drag it into the target before the code changes.
+A Claude Code skill for concepts, separation of concerns, encapsulation and
+abstraction: it translates a codebase's concepts into its actual objects and
+reviews the architecture for patterns, antipatterns and dark concepts. It
+takes a concept map (what the software is for), reviews one object at a time
+(its whole interface, every outside caller, everything that reaches its files
+without it), draws the current state on a live board and lets you drag it
+into the target encapsulation before the code changes.
 
 It sits after concept design: write the concept map yourself, or produce it
 with a concept-design skill such as

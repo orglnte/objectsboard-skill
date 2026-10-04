@@ -1,13 +1,14 @@
 # objectsboard
 
 A Claude Code skill for concepts, separation of concerns, encapsulation and
-abstraction: it translates a codebase's concepts into its actual objects and
-reviews the architecture for patterns, antipatterns and dark concepts,
-interactively, through an Objects Board. It
-takes a concept map (what the software is for), reviews one object at a time
-(its whole interface, every outside caller, everything that reaches its files
-without it), draws the current state on a live board and lets you drag it
-into the target encapsulation before the code changes.
+abstraction: it draws a codebase's objects as the code has them, lays its
+concepts over them, and reviews the architecture for patterns, antipatterns
+and dark concepts, interactively, through an Objects Board. It takes a
+concept map (what the software is for), reviews one object at a time (its
+whole interface, every outside caller, everything that reaches its files
+without it), draws the current state on a live board, and supports the
+design round by round: you pick the next change, the code changes, the
+board is redrawn from the code.
 
 It sits after concept design: write the concept map yourself, or produce it
 with a concept-design skill such as
@@ -47,9 +48,9 @@ Then `/objectsboard` in Claude Code.
    follows factories, parameters, stand-ins and attributes or properties that
    hold an instance.
 4. `tools/trace_objects.py`: the objects representation of a whole
-   codebase: its concept classes, one arrow per pair of classes that call
-   each other, modules not encapsulated by a class as external boxes; from
-   the test suite's run and the source. `--worklist` ranks the bypasses
+   codebase as the code has it: its classes with behaviour, one arrow per
+   pair that call each other, modules no class holds as external boxes,
+   the concepts as an overlay; from the test suite's run and the source. `--worklist` ranks the bypasses
    into the refactoring order, with their call sites.
 5. `tools/trace_uses.py`: the run-time cross-check and the call graph into
    the object, recorded while the test suite runs (needs good test coverage;

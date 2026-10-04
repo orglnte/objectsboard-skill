@@ -1,17 +1,23 @@
 # Objectsboard method
 
-How to translate concepts into objects: for one object at a time, what it
-really offers, who reaches it and why, and what goes around it, then a board
-where the user draws the target. The tools are in `tools/`.
+For one object at a time: what it really offers, who reaches it and why,
+and what goes around it; for the whole codebase, the objects as the code
+has them with the concepts laid over them; then a board where the user
+decides the next change. The tools are in `tools/`.
 
-## From concepts to objects
+## Concepts and objects
 
-1. Start from the concept map (concept | description | aliases | objects |
-   concerns). Each concept names the objects it should rest on.
-2. A concept is delivered well when its state and its files are owned by
-   those objects and reached only through them. The review below measures
-   exactly that, for one object.
-3. Concepts whose effect surprises their user (dark concepts) and names that
+1. The concept map (concept | description | aliases | objects | concerns)
+   says what the software is for. It does not decide encapsulation,
+   abstraction, separation of concerns or ownership: those are design, made
+   by the user. A concept does not become a class by itself.
+2. The board draws the code as it is; the concepts are an overlay on it
+   (which boxes carry which concept, a concept spread over several owners,
+   a box carrying several) that informs the design and moves nothing.
+3. The design is iterative: each round the user picks the next change from
+   the worklist and the concept findings, the code changes in one commit,
+   the board is redrawn from the code.
+4. Concepts whose effect surprises their user (dark concepts) and names that
    collide (one name, two meanings; two names, one meaning) are listed next
    to the map, in a TODO file: they are the first candidates to fix.
 
@@ -19,8 +25,8 @@ where the user draws the target. The tools are in `tools/`.
 
 Every part (a module, a helper, a nested class) and every datum (a file, a
 folder, an external system's state) has exactly one owner, and everything
-else reaches it only through that owner. A concept class with its parts and
-its data is one unit; the class is its root. A red arrow on the board is an
+else reaches it only through that owner. A class with its parts and its
+data is one unit; the class is its root. A red arrow on the board is an
 access that goes around the owner.
 
 On the board, all legitimate traffic between two owners is one arrow between
@@ -120,7 +126,8 @@ decided.
    with two lines of context.
 3. **`trace_objects.py`**: the objects representation of a whole codebase
    (view 6) from the test suite's run and the source: `--concepts` names
-   the concept map whose Objects column picks the classes drawn; `--spec`
+   the concept map, laid over the boxes and the source of the data's
+   patterns (its Resources table); `--spec`
    writes the board spec. An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
    with the observation as proof. `--worklist FILE` writes the bypasses as
@@ -252,20 +259,21 @@ cannot see is not evidence that nothing is there.
    caller's box lists exactly the members it uses; each arrow reads
    `calls N members`. Callers nested by owner show which owner needs which
    slice.
-6. **Whole codebase (the objects representation):** concept classes as
-   boxes, one arrow per pair, modules no class encapsulates as external
-   boxes, and the resources (data) from the map's Resources table, with an
-   arrow from every box whose code reaches one directly (a bypass unless it
-   is the owner). Placement from structure and the concept map: the map's
-   consistent declarations, then the file's concept class, then the
-   package's (named after its folder, never the root), composition (a class
-   kept as `self.x`, built directly or by a project factory function) and
-   subclassing between classes; usage never moves a box. Usage flags, in the
-   warning colour, the arrows that bypass an owner's interface, the
-   misplaced modules and the doubts (map and folder disagree, the map's rows
-   disagree, or the owner never uses its module); the bypass arrows are the
-   refactoring worklist, the doubts are settled in the concept map. No box
-   around everything, no folder boxes, never the module import graph.
+6. **Whole codebase (the objects representation):** the code as it is.
+   Classes with behaviour of their own as boxes, one arrow per pair,
+   modules no class holds as external boxes, and the resources (data)
+   named in the map's Resources table, with an arrow from every box whose
+   code reaches one directly (a bypass unless it is the data's only writer;
+   several writers are flagged as shared). Placement from the code's
+   structure only: the file's class, composition (a class kept as `self.x`,
+   built directly or by a project factory function) and subclassing, then
+   the package's class (named after its folder, never the root); neither
+   usage nor the concept map moves a box. The concepts are an overlay:
+   labels, and flags for a concept spread over several owners or a box
+   carrying several. Usage flags, in the warning colour, the arrows that
+   bypass an owner and the doubts (an owner that never uses its module).
+   No box around everything, no folder boxes, never the module import
+   graph.
 
 ## Pitfalls
 

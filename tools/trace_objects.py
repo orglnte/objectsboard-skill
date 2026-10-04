@@ -21,17 +21,13 @@ matching the resource's pattern). An attribute is matched by name, so a
 same-named attribute of another object can show up. Route the first entry through its owner,
 re-run, take the next.
 
---spec also lists the moves: each external module whose only concept-class
-user is one class is proposed to move into it (its other users, external
-modules, would then reach it through that class).
-
---spec writes a board spec for board.py: one box per class that encapsulates
-a concept (--concepts: the concept map's Objects column; without it, every
-class); a helper class folds into the concept class of its file, else into
-its module; a module called by one concept class only is drawn inside it,
-any other module is an external box; no folder boxes and no box around
-everything; one arrow per pair of boxes, labelled with the members called,
-each with a proof: one of
+--spec writes a board spec for board.py, the code as it is: one box per
+class with behaviour of its own, placed by the code's structure (see
+spec_of); --concepts lays the concept map over it and names the data; the
+spec also lists each owned part used from outside its owner, with those
+users (the bypasses). No folder boxes and no box around everything; one
+arrow per pair of boxes, labelled with the members called, each with a
+proof: one of
 those members, or the callee's name, appears in the caller's file; when
 neither does (a subclass, a callback, an injected function), the arrow is
 marked "[run time only]" and its proof is the observation itself.
@@ -258,19 +254,22 @@ def importers(root):
     return out
 
 
-def map_rows(map_file):
-    """[(objects cell text)] for each row of the concept map's table."""
+def concept_rows(map_file):
+    """[(concept, [code names])] for each row of the concept map's table
+    (Concept | Description | Aliases | Objects | Concerns)."""
     rows = []
     for line in Path(map_file).read_text().splitlines():
         cells = [c.strip() for c in line.split("|")]
         if line.startswith("|") and len(cells) > 6 and "`" in cells[4]:
-            rows.append(cells[4])
+            rows.append((cells[1].strip("* "), re.findall(r"`([^`]+)`", cells[4])))
     return rows
 
 
 def resource_rows(map_file):
-    """[(name, kind, owner class name or None, [regex])] from the concept
-    map's resources table (columns Resource | Kind | Owner | Reached by)."""
+    """[(name, kind, declared owner or None, [regex])] from the concept
+    map's resources table (columns Resource | Kind | Owner | Reached by).
+    The declared owner is not used: the board's owner is the data's only
+    writer in the code."""
     rows, on = [], False
     for line in Path(map_file).read_text().splitlines():
         cells = [c.strip() for c in line.split("|")]
@@ -291,76 +290,54 @@ def resource_rows(map_file):
 WRITES = re.compile(r"write_text|write_bytes|\.write\(|mkdir|rename|unlink|touch|\.save\(|open\([^)]*[\"'][wa]")
 
 
-def concept_classes(map_file, objs):
-    """The classes the concept map names in its Objects column."""
-    names = {n.split(".")[0] if n[:1].isupper() else n for row in map_rows(map_file)
-             for n in re.findall(r"`([^`]+)`", row)}
-    return {oid for oid, o in objs.items() if o["kind"] == "class" and o["name"].split(".")[-1] in names}
-
-
-def declared(map_file, keep, objs, root):
-    """{module path: owner class id or None} from the concept map: a module
-    or folder named in rows that each name exactly one concept class, the
-    same one, belongs to it; one marked "(external)" is external. A module
-    the rows assign differently is left to the other rules."""
-    out = {}
-    cls_by_name = {objs[k]["name"].split(".")[-1]: k for k in keep}
-    files = [str(p) for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts]
-
-    def match(name):
-        name = name.rstrip("/")
-        return [f for f in files if f.endswith("/" + name) or f.endswith("/" + name + ".py")
-                or ("/" + name + "/") in f or f.endswith("/" + name + "/__init__.py")]
-
-    votes = {}
-    for row in map_rows(map_file):
-        names = re.findall(r"`([^`]+)`(\s*\(external\))?", row)
-        owners = {cls_by_name[n.split(".")[0]] for n, _ in names if n.split(".")[0] in cls_by_name}
-        for n, ext in names:
-            if n.split(".")[0] in cls_by_name:
-                continue
-            if not ext and not owners:
-                continue                      # a row naming no class assigns nothing
-            for f in match(n):
-                votes.setdefault(f, set()).add(None if ext else (next(iter(owners)) if len(owners) == 1 else "?"))
-    conflicts = {}
-    for f, v in votes.items():
-        if len(v) == 1 and "?" not in v:
-            out[f] = next(iter(v))            # every row naming it agrees
-        else:
-            conflicts[f] = sorted(objs[x]["name"] if x in objs else ("external" if x is None else "a row naming several classes")
-                                  for x in v)
-    declared.conflicts = conflicts
-    return out
+def is_exception(k, facts, seen=()):
+    bases = facts.get(k, {}).get("bases", [])
+    return any(b in ("BaseException", "Exception") or b.endswith(("Error", "Exception", "Warning")) for b in bases)
 
 
 def spec_of(objs, edges, root, concepts=None):
-    """The objects representation. Placement comes from structure and the
-    concept map, never from usage; usage only lists the bypasses.
+    """The objects representation of the code as it is. Boxes and placement
+    come from the code's structure, never from usage (usage only lists the
+    bypasses) and never from the concept map (concepts do not translate
+    into classes: the map is an overlay that informs the design, which the
+    person makes on the board).
 
-    1. The concept map declares it: a module named in a row with exactly one
-       concept class belongs to that class; one marked "(external)" is
-       external.
-    2. The file holds a concept class: its functions and helper classes
-       belong to that class (the class named after the file when it holds
-       several; the others nest inside it).
-    3. The package names its class: any other module belongs to the concept
-       class named after its folder (`cell/` -> Cell, `variants/` ->
-       Variant), or the nearest enclosing folder's; never the root's.
-    4. A concept class created and kept by exactly one other nests in it
+    A box is a class with behaviour of its own: a public method, and not a
+    value class (dataclass, NamedTuple, Enum, TypedDict) or an exception.
+
+    1. The file holds a box class: its functions and helper classes belong
+       to that class (the class named after the file when it holds several;
+       the others nest inside it).
+    2. The package names its class: any other module, and a box class that
+       rule 3 does not place, belongs to the box class named after its
+       folder (`cell/` -> Cell, `variants/` -> Variant), or the nearest
+       enclosing folder's; never the root's.
+    3. A box class created and kept by exactly one other nests in it
        (`self.x = Other(...)`, or through a project factory function whose
        `return Other(...)` builds it); a subclass folds into its base.
-    5. Everything else is external.
-    6. A use of an owned module or class from outside its owner is a bypass,
-       listed as a move. One arrow per pair of boxes."""
+    4. Everything else is external.
+    5. A use of an owned module or class from outside its owner is a bypass,
+       listed as a move. One arrow per pair of boxes.
+
+    Data (the map's resources table names it and how code reaches it): its
+    owner is its only writer in the code (a write anywhere in the function
+    that reaches it); a reach from anyone else is a
+    bypass; several writers mean no single owner, and each write is flagged
+    as shared.
+
+    The concept map, when given, is an overlay: each box is labelled with
+    the concepts whose Objects cell names it, and a concept spread over
+    several boxes or a box carrying several concepts is flagged
+    ("concept: ..."); a concept naming nothing in the code is listed under
+    "unmapped". None of it moves a box."""
     rootp = Path(root)
     facts = class_facts(root)
-    keep = concept_classes(concepts, objs) if concepts else {k for k, o in objs.items() if o["kind"] == "class"}
+    keep = {k for k, o in objs.items() if o["kind"] == "class"
+            and not facts.get(k, {}).get("value") and not is_exception(k, facts)}
     byname = {objs[k]["name"].split(".")[-1]: k for k in keep}
-    for k in sorted(keep):                    # 4b: a subclass folds into its base
+    for k in sorted(keep):                    # 3b: a subclass folds into its base
         if any(b in byname and byname[b] != k for b in facts.get(k, {}).get("bases", [])):
             keep.discard(k)
-    decl = declared(concepts, keep, objs, root) if concepts else {}
 
     def primary_of_file(f):
         ks = [k for k in keep if objs[k]["file"] == f]
@@ -378,31 +355,16 @@ def spec_of(objs, edges, root, concepts=None):
     def owner_of_file(f):
         """(owner class id or None, rule) for the code in file f."""
         p = Path(f)
-        for key in (f, *[str(x) for x in p.parents]):
-            if key in decl:
-                return decl[key], 1
         c = primary_of_file(f)
         if c:
-            return c, 2
+            return c, 1
         for d in p.parents:
             if d == rootp or rootp not in d.parents:
                 break
             c = primary_of_dir(d)
             if c:
-                return c, 3
-        return None, 5
-
-    def structural_owner(f):
-        c = primary_of_file(f)
-        if c:
-            return c
-        for d in Path(f).parents:
-            if d == rootp or rootp not in d.parents:
-                break
-            c = primary_of_dir(d)
-            if c:
-                return c
-        return None
+                return c, 2
+        return None, 4
 
     # every traced object -> the box it is drawn in, and that box's owner
     box, parent, sub_of = {}, {}, {}
@@ -410,11 +372,8 @@ def spec_of(objs, edges, root, concepts=None):
         if oid in keep:
             box[oid] = oid
             prim = primary_of_file(o["file"])
-            dec = decl.get(o["file"])
-            if dec and dec != oid:
-                parent[oid] = dec             # rule 1: its file is declared another class's
-            elif prim and prim != oid:
-                parent[oid] = prim            # rule 2: a second concept class in a file nests in its primary
+            if prim and prim != oid:
+                parent[oid] = prim            # rule 1: a second box class in a file nests in its primary
             continue
         if o["kind"] == "class":
             base = next((byname[b] for b in facts.get(oid, {}).get("bases", []) if b in byname and byname[b] in keep), None)
@@ -422,7 +381,7 @@ def spec_of(objs, edges, root, concepts=None):
                 box[oid] = sub_of[oid] = base
                 continue
         owner, rule = owner_of_file(o["file"])
-        if rule == 2:
+        if rule == 1:
             box[oid] = owner                  # helpers of the class in their file
         elif owner is not None:
             box[oid] = o["file"]              # a module of its owner's package: drawn inside it
@@ -434,10 +393,28 @@ def spec_of(objs, edges, root, concepts=None):
         kb, ob = sub_of.get(k, k), box.get(o, o)
         if kb in keep and ob in keep and kb != ob:
             kept_by.setdefault(kb, set()).add(ob)
-    for k in sorted(keep):                    # 4a: composition
+    def holds(a, b):                          # a is b, or holds b, through parent
+        while b is not None:
+            if a == b:
+                return True
+            b = parent.get(b)
+        return False
+
+    for k in sorted(keep):                    # 3a: composition
         o = kept_by.get(k, set())
-        if len(o) == 1 and k not in parent:
+        if len(o) == 1 and k not in parent and not holds(k, next(iter(o))):
             parent[k] = next(iter(o))
+    for k in sorted(keep):                    # 2, for a box class no one keeps alone: its package's class
+        if k in parent:
+            continue
+        for d in Path(objs[k]["file"]).parents:
+            if d == rootp or rootp not in d.parents:
+                break
+            c = primary_of_dir(d)
+            if c and c != k:
+                if not holds(k, c):
+                    parent[k] = c
+                break
     pairs = {}
     for e in edges:
         a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
@@ -524,16 +501,11 @@ def spec_of(objs, edges, root, concepts=None):
         if b in N:
             N[b]["flag"] = "called directly from outside " + objs[m["into"]]["name"] + ": " + ", ".join(
                 Path(u.split(":")[0]).name + (":" + u.split(":")[1] if ":" in u else "") for u in m["other_users"])
-    for n in nodes:
-        if n["kind"] == "external" and owner_of_file(n["id"])[1] == 1:
-            p = Path(n["id"])
-            if any(primary_of_dir(d) for d in p.parents if d != rootp and rootp in d.parents):
-                n["flag"] = f"misplaced: in {p.parent}/ but no class owns it"
     # resources (data): one box each, an arrow from every box whose code
-    # reaches it directly; from anyone but its owner, the arrow is a bypass
+    # reaches it directly; its owner is its only writer, and a reach from
+    # anyone else is a bypass
     res_rows = resource_rows(concepts) if concepts else []
     if res_rows:
-        cls_ids = {objs[k]["name"].split(".")[-1]: k for k in keep}
         N = {n["id"]: n for n in nodes}
         hits = {}
         for pth in sorted(rootp.rglob("*.py")):
@@ -545,6 +517,25 @@ def spec_of(objs, edges, root, concepts=None):
             except (SyntaxError, UnicodeDecodeError):
                 continue
             spans = [(c.lineno, c.end_lineno, c.name) for c in ast.walk(tree) if isinstance(c, ast.ClassDef)]
+            lines_ = text.splitlines()
+            fspans = [(f.lineno, f.end_lineno) for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+            def writes_near(ln):
+                """A write in the innermost function around line ln, else on
+                the line; when the line keeps the path in a name (`self.x =`,
+                `X =`), a write through that name in the same class or module."""
+                inner = [f for f in fspans if f[0] <= ln <= f[1]]
+                a, b = min(inner, key=lambda f: f[1] - f[0]) if inner else (ln, ln)
+                if any(WRITES.search(x) for x in lines_[a - 1:b] if not x.lstrip().startswith("#")):
+                    return True
+                m = re.match(r"\s*((?:self\.)?\w+)\s*(?::[^=]*)?=[^=]", lines_[ln - 1])
+                if not m:
+                    return False
+                cls = [c for c in spans if c[0] <= ln <= c[1]]
+                a, b = (min(cls, key=lambda c: c[1] - c[0])[:2]) if cls and m.group(1).startswith("self.") else (1, len(lines_))
+                name = re.compile(r"(?<![\w.])" + re.escape(m.group(1)) + r"\b")
+                return any(name.search(x) and WRITES.search(x) for i, x in enumerate(lines_[a - 1:b], a)
+                           if i != ln and not x.lstrip().startswith("#"))
             for ln, line in enumerate(text.splitlines(), 1):
                 if line.strip().startswith("#"):
                     continue
@@ -555,18 +546,27 @@ def spec_of(objs, edges, root, concepts=None):
                             cname = min(inner, key=lambda c: c[1] - c[0])[2] if inner else None
                             src = box.get(f"{pth}:{cname}") if cname and f"{pth}:{cname}" in box else box.get(str(pth), str(pth))
                             h = hits.setdefault((src, ri), {"write": False, "file": str(pth), "pattern": pat, "names": []})
-                            h["write"] |= bool(WRITES.search(line))
+                            h["write"] |= writes_near(ln)
                             short = pat.replace("\\", "").strip('/ "').strip('"')
                             if short not in h["names"]:
                                 h["names"].append(short)
                             break
-        for ri, (rname, rkind, rowner, pats) in enumerate(res_rows):
+        def box_name(b):
+            return objs[b]["name"] if b in objs and objs[b]["kind"] == "class" else (
+                (str(Path(b).parent) + "/") if Path(b).name == "__init__.py" else Path(b).name)
+
+        writers = {}
+        for (src, ri), h in hits.items():
+            if h["write"]:
+                writers.setdefault(ri, set()).add(top(src))
+        for ri, (rname, rkind, _declared, pats) in enumerate(res_rows):
             if not any(k[1] == ri for k in hits):
                 continue
-            rid = f"resource:{rname}"
-            owner_id = cls_ids.get(rowner) if rowner else None
-            nodes.append({"id": rid, "name": rname, "kind": rkind if rkind in ("folder", "file") else "external",
-                          "parent": None, "note": f"owner: {rowner}" if rowner else "no owner"})
+            w = sorted(writers.get(ri, set()))
+            note = (f"owner: {box_name(w[0])}" if len(w) == 1 else
+                    "no single owner: written by " + ", ".join(box_name(x) for x in w) if w else "written by no code here")
+            nodes.append({"id": f"resource:{rname}", "name": rname,
+                          "kind": rkind if rkind in ("folder", "file") else "external", "parent": None, "note": note})
         N = {n["id"]: n for n in nodes}
         for (src, ri), h in sorted(hits.items(), key=lambda kv: (kv[0][1], str(kv[0][0]))):
             rname, rkind, rowner, pats = res_rows[ri]
@@ -578,25 +578,20 @@ def spec_of(objs, edges, root, concepts=None):
                               "kind": "object" if o.get("kind") == "class" else ("module" if src in parent else "external"),
                               "parent": parent.get(src), "note": o["file"]})
                 N[src] = nodes[-1]
-            owner_id = cls_ids.get(rowner) if rowner else None
+            w = sorted(writers.get(ri, set()))
             label = " · ".join(h["names"][:3]) + (f"  (+{len(h['names']) - 3})" if len(h["names"]) > 3 else "")
             e = {"from": src, "to": f"resource:{rname}", "kind": "writes" if h["write"] else "reads", "label": label,
                  "proof": [{"file": h["file"], "pattern": h["pattern"]}]}
-            if owner_id and top(src) != owner_id:
-                e["flag"] = f"bypass: reaches {rowner}'s data directly"
+            if len(w) == 1 and top(src) != w[0]:
+                e["flag"] = f"bypass: reaches {box_name(w[0])}'s data directly"
+            elif len(w) > 1 and h["write"]:
+                e["flag"] = "shared: written by " + ", ".join(box_name(x) for x in w)
             E.append(e)
-    conflicts = getattr(declared, "conflicts", {}) if concepts else {}
     for n in nodes:
         f = n["note"].split("  ")[0] if n["id"] not in objs or objs[n["id"]]["kind"] == "module" else None
         if not f:
             continue
         doubts = []
-        if f in conflicts:
-            doubts.append("the concept map's rows disagree: " + ", ".join(conflicts[f]))
-        if f in decl and decl[f] is not None:
-            s_own = structural_owner(f)
-            if s_own and s_own != decl[f]:
-                doubts.append(f"the map says {objs[decl[f]]['name']}, its folder says {objs[s_own]['name']}")
         if n["id"] in parent:
             owner = top(n["id"])
             users = {top(box.get(e["from"], e["from"])) for e in edges if box.get(e["to"]) == n["id"]}
@@ -630,7 +625,52 @@ def spec_of(objs, edges, root, concepts=None):
                            "label": " · ".join(labs[:3]) + (f"  (+{len(labs) - 3})" if len(labs) > 3 else ""),
                            "proof": m["proof"][:1]})
     E[:] = keep_edges
-    return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)]}
+    unmapped = overlay(concepts, objs, box, nodes, top) if concepts else []
+    return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)],
+            "unmapped": unmapped}
+
+
+def overlay(concepts, objs, box, nodes, top):
+    """Label each box with the concepts whose Objects cell names code in
+    it, and flag the mismatches; returns the concepts naming nothing here."""
+    N = {n["id"]: n for n in nodes}
+    by_class = {}
+    for oid, o in objs.items():
+        if o["kind"] == "class":
+            by_class.setdefault(o["name"].split(".")[-1], []).append(oid)
+
+    def boxes_of(name):
+        head = name.split(".")[0].rstrip("/")
+        found = {box.get(oid) for oid in by_class.get(head, [])}
+        if not found - {None}:
+            found = {box.get(oid, oid) for oid, o in objs.items() if o["kind"] == "module" and (
+                Path(o["file"]).stem == head or f"/{head}/" in "/" + o["file"])}
+        return {b for b in found if b in N}
+
+    carried, unmapped = {}, []
+    for concept, names in concept_rows(concepts):
+        bs = set().union(*[boxes_of(n) for n in names]) if names else set()
+        if not bs:
+            unmapped.append(concept)
+            continue
+        for b in bs:
+            carried.setdefault(b, []).append(concept)
+        tops = sorted({top(b) for b in bs})
+        if len(tops) > 1:
+            for b in bs:
+                N[b].setdefault("_findings", []).append(
+                    f"concept: {concept} is spread over " + ", ".join(N[t]["name"] for t in tops))
+    for b, cs in carried.items():
+        n = N[b]
+        n["concepts"] = cs
+        n["note"] = (n["note"] + "  " if n["note"] else "") + "concepts: " + ", ".join(cs)
+        if len(cs) > 1:
+            n.setdefault("_findings", []).append("concept: carries " + ", ".join(cs))
+    for n in nodes:
+        f = n.pop("_findings", [])
+        if f:
+            n["flag"] = " — ".join(([n["flag"]] if n.get("flag") else []) + f)
+    return unmapped
 
 
 def worklist(spec):
@@ -715,7 +755,7 @@ def main():
     ap.add_argument("--root", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--spec")
-    ap.add_argument("--concepts", help="the concept map (markdown); its Objects column picks the classes drawn")
+    ap.add_argument("--concepts", help="the concept map (markdown): laid over the boxes, and its Resources table names the data")
     ap.add_argument("--tests-dir", default="tests")
     ap.add_argument("--worklist", metavar="FILE",
                     help="with --spec: write the bypasses as a refactoring worklist, the most bypassed part first")
@@ -736,7 +776,9 @@ def main():
         spec = spec_of(objs, edges, a.root, a.concepts)
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
-            print(f"move {m['module']} into {m['into']}: {m['why']}", file=sys.stderr)
+            print(f"bypassed: {m['module']} ({m['why']})", file=sys.stderr)
+        if spec["unmapped"]:
+            print("concepts naming nothing in the code: " + ", ".join(spec["unmapped"]), file=sys.stderr)
         if a.worklist:
             with open(a.worklist, "w") as out:
                 print_worklist(worklist(spec), out)

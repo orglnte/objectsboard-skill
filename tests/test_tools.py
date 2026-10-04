@@ -230,11 +230,13 @@ def _square(x):
 ''',
     "lib/report/__init__.py": "",
     "lib/report/report.py": '''
+from pathlib import Path
 from lib.report import fmt
 
 
 class Report:
     def show(self, shape):
+        (Path(".") / "out").mkdir(exist_ok=True)
         return fmt.fmt(shape.area().value)
 ''',
     "lib/report/fmt.py": '''
@@ -247,7 +249,7 @@ from lib.report import fmt
 
 
 def line():
-    (Path(".") / "out").mkdir(exist_ok=True)
+    (Path(".") / "out").exists()
     return fmt.fmt(2)
 ''',
 }
@@ -283,7 +285,8 @@ def test_objects_representation_rules(tmp_path):
         ("lib/report/report.py:Report", ["lib/util.py"])]                       # util goes around Report
     assert [n["kind"] for n in s["nodes"] if n["id"] == "resource:out/"] == ["folder"]
     res = [e for e in s["edges"] if e["to"] == "resource:out/"]
-    assert [(e["from"], e["kind"], bool(e.get("flag"))) for e in res] == [("lib/util.py", "writes", True)]
+    assert sorted((e["from"], e["kind"], bool(e.get("flag"))) for e in res) == [
+        ("lib/report/report.py:Report", "writes", False), ("lib/util.py", "reads", True)]   # its only writer owns it
     assert "lib/util.py" in N["lib/report/fmt.py"]["flag"] or "util.py" in N["lib/report/fmt.py"]["flag"]
     flagged = [(e["from"], e["to"]) for e in s["edges"] if e.get("flag")]
     assert ("lib/util.py", "lib/report/fmt.py") in flagged                   # the arrow around Report
@@ -456,3 +459,65 @@ def test_layout_is_deterministic_clear_of_overlaps_and_keeps_parts_inside(monkey
         assert B["e"][1] < B[p][1] and B[p][1] + B[p][3] < B["e"][1] + B["e"][3]
     stacked = board.build(_square_spec(), None, None)   # the default placement, for comparison
     assert sum(board.crossings(d1)) <= sum(board.crossings(stacked))
+
+
+OVERLAY_MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"
+               "| Geometry | shapes | - | `Shape`, `Report` | - |\n| Output | output | - | `Report` | - |\n"
+               "| Ghost | nothing | - | `Nowhere` | - |\n\n"
+               "| Resource | Kind | Owner | Reached by |\n|---|---|---|---|\n"
+               "| `out/` | folder | `Shape` | `/ \"out\"` |\n")
+
+
+def test_boxes_and_data_owners_come_from_the_code_and_concepts_only_overlay(tmp_path):
+    import trace_objects
+    files = dict(REPR, **{"lib/errors.py": "class BadShape(Exception):\n    def why(self):\n        return 1\n",
+                          "lib/util.py": REPR["lib/util.py"].replace(".exists()", ".mkdir(exist_ok=True)")})
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(OVERLAY_MAP)
+    cwd = Path.cwd()
+    edges = [{"from": "lib/report/report.py:Report", "to": "lib/shapes.py:Shape", "members": ["area"]},
+             {"from": "lib/util.py", "to": "lib/errors.py:BadShape", "members": ["why"]}]
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        bare = trace_objects.spec_of(objs, edges, "lib")
+        s = trace_objects.spec_of(objs, edges, "lib", "MAP.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert "lib/errors.py:BadShape" not in N and "lib/shapes.py:Area" not in N     # an exception, a value class: no box
+    assert {n["id"]: n["parent"] for n in bare["nodes"]} == {n["id"]: n["parent"] for n in s["nodes"]
+                                                           if not n["id"].startswith("resource:")}   # the map moves nothing
+    assert N["lib/report/report.py:Report"]["concepts"] == ["Geometry", "Output"]
+    assert "concept: carries Geometry, Output" in N["lib/report/report.py:Report"]["flag"]
+    assert "concept: Geometry is spread over" in N["lib/shapes.py:Shape"]["flag"]
+    assert s["unmapped"] == ["Ghost"]
+    writes = [e for e in s["edges"] if e["to"] == "resource:out/"]
+    assert N["resource:out/"]["note"].startswith("no single owner: written by")   # the map's declared owner is ignored
+    assert writes and all(e["flag"].startswith("shared: written by") for e in writes)
+
+
+def test_a_class_no_one_keeps_nests_in_its_packages_class_and_a_write_counts_in_its_function(tmp_path):
+    import trace_objects
+    files = dict(REPR, **{"lib/report/table.py": "class Table:\n    def rows(self):\n        return []\n",
+                          "lib/util.py": REPR["lib/util.py"].replace('    (Path(".") / "out").exists()\n',
+                                                                     '    d = Path(".") / "out"\n    d.mkdir(exist_ok=True)\n')})
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(MAP)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        s = trace_objects.spec_of(objs, [{"from": "lib/util.py", "to": "lib/report/table.py:Table", "members": ["rows"]}],
+                                  "lib", "MAP.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/report/table.py:Table"]["parent"] == "lib/report/report.py:Report"   # report/ names Report
+    assert N["resource:out/"]["note"].startswith("no single owner")    # util's write is two lines below the path

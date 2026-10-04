@@ -1,14 +1,17 @@
 ---
 name: objectsboard
-description: Concepts, separation of concerns, encapsulation and abstraction — translate a codebase's concepts into its actual objects and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact) and let the user drag it into the target encapsulation before any code changes. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
+description: Concepts, separation of concerns, encapsulation and abstraction — draw a codebase's objects as the code has them, overlay its concepts, and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact), and refactor round by round: the user decides each next step on the board, the code changes, the board is redrawn from the code. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
 ---
 
 # Objectsboard
 
 Concepts say what the software is for; objects are the code that delivers
-them. This skill checks, one object at a time, that each concept's state and
-files are owned by the objects meant to own them, shows the gap on a board,
-and lets the user draw the target encapsulation.
+them. A concept does not translate into a class by itself: encapsulation,
+abstraction, separation of concerns and ownership are design, and the user
+makes the design. This skill draws the objects as the code has them, lays
+the concepts over them, shows what goes around each owner, and supports
+the design round by round: the user picks the next change, the code
+changes, the board is redrawn from the code.
 
 **Python only for now:** the extractor parses Python source. The method and
 the board work for any language, but the interface and its uses would have
@@ -16,8 +19,8 @@ to be gathered by hand.
 
 It covers:
 
-1. **Concepts:** what each unit of function is for, its aliases and the
-   objects it rests on.
+1. **Concepts:** what each unit of function is for and its aliases, laid
+   over the objects as an overlay that informs the design.
 2. **Separation of concerns:** one concept per object; a concept spread over
    several objects, or an object carrying several concepts, is a finding.
 3. **Encapsulation:** an object's state and files reached only through it.
@@ -41,33 +44,46 @@ It covers:
 
 ## The whole codebase: the objects representation (Python)
 
-When the user wants to see everything, draw the objects representation:
-`tools/trace_objects.py --concepts <concept map> --spec ...`. Boxes are the
-classes that encapsulate a concept (the map's Objects column), one arrow
-per pair of boxes that call each other, modules no class encapsulates as
-external boxes, and the **resources (data)**: the files, folders and
-external systems the objects keep their data in or drive, from the map's
-Resources table (Resource | Kind | Owner | Reached by: the code patterns
-that reach it directly, such as a path joined to its name). Each box whose
-code reaches a resource gets an arrow to it; from anyone but its owner, the
-arrow is a bypass.
+When the user wants to see everything, draw the objects representation of
+the code **as it is**: `tools/trace_objects.py --concepts <concept map>
+--spec ...`. Boxes are the classes with behaviour of their own (a public
+method; not a value class such as a dataclass, NamedTuple or Enum, and not
+an exception), one arrow per pair of boxes that call each other, modules no
+class holds as external boxes, and the **resources (data)**: the files,
+folders and external systems the code keeps data in or drives, named with
+the code patterns that reach them in the map's Resources table (Resource |
+Kind | Owner | Reached by). Each box whose code reaches a resource gets an
+arrow to it.
 
-**Placement comes from structure and the concept map, never from usage**
+**Concepts do not decide the board.** Concepts say what the software is
+for; encapsulation, abstraction, separation of concerns and ownership are
+design, and the person makes the design. A concept does not translate into
+a class by itself. On the board the concept map is an **overlay**: each box
+is labelled with the concepts whose Objects cell names it, and mismatches
+are flagged (a concept spread over several owners, a box carrying several
+concepts; a concept naming nothing in the code is listed). They inform the
+design; they never move a box. The map's Owner column is documentation,
+not an input.
+
+**Placement comes from the code's structure, never from usage or concepts**
 (the first rule that matches wins):
 
-1. The concept map declares it: a module the map's rows consistently list
-   with one concept class belongs to it; one marked `(external)` is
-   external.
-2. The file holds a concept class: its functions and helper classes belong
-   to it (the class named after the file, or after the package for an
-   `__init__.py`); another concept class in the file nests inside it.
-3. The package names its class: any other module belongs to the concept
-   class named after its folder (`cell/` -> Cell), or the nearest enclosing
-   folder's, never the root's.
-4. A concept class created and kept by exactly one other nests in it
+1. The file holds a box class: its functions and helper classes belong to
+   it (the class named after the file, or after the package for an
+   `__init__.py`); another box class in the file nests inside it.
+2. A box class created and kept by exactly one other nests in it
    (`self.x = Other(...)`, or `self.x = make(...)` where the project
    function `make` returns `Other(...)`); a subclass folds into its base.
-5. Everything else is external.
+3. The package names its class: any other module, and a box class no one
+   class keeps, belongs to the class named after its folder (`cell/` ->
+   Cell), or the nearest enclosing folder's, never the root's.
+4. Everything else is external.
+
+**Data's owner is its only writer in the code** (a write anywhere in the
+function that reaches it, or through the name the path is kept in). Several
+writers: no single owner, each write flagged as shared. Data reached only
+through a helper that returns its path is not followed: its writers are
+not seen.
 
 **The criterion:** one owner per part and per datum; everything else goes
 through the owner (information hiding, the aggregate root, the Law of
@@ -80,21 +96,21 @@ makes it.
 
 **Usage only shows what is wrong, in the warning colour:**
 
-1. **Bypass arrows:** an arrow from outside an owner straight into one of its
-   parts (a module or a nested class) goes around the owner's interface.
-   These are the refactoring worklist: `trace_objects.py --worklist FILE`
-   ranks the bypassed parts, the most bypassed first, each with its call
-   sites (file:line). Take the first entry, route its callers through the
-   owner, one commit, suites green, re-run, redraw, take the next.
-2. **Flagged boxes:** a part called directly from outside its owner, and a
-   misplaced module (in an owner's folder, but owned by no class).
-3. **Doubts, flagged in place (no extra box):** the concept map and the
-   folder name different owners, the map's rows disagree, or the owner never
-   uses a module that exactly one other class uses. The box stays where the
-   rules put it; its flag names the competing owners. The user settles each
-   doubt in the concept map.
+1. **Bypass arrows:** an arrow from outside an owner straight into one of
+   its parts (a module, a nested class, its data) goes around the owner.
+   `trace_objects.py --worklist FILE` ranks the bypassed parts, the most
+   bypassed first, each with its call sites (file:line).
+2. **Flagged boxes:** a part called directly from outside its owner; a
+   module its owner never uses while exactly one other class does (a doubt).
+3. **Concept findings** (the overlay above), flagged in place.
 4. Never draw one box around everything, folder boxes, or the module import
    graph as the whole-codebase board.
+
+**The design is iterative, not one step to a target.** The board is always
+the current code. Each round the person picks the next change, informed by
+the worklist and the concept findings; the code changes in one commit,
+suites green; the board is traced and redrawn from the code; the next round
+starts from there.
 
 ## Input
 
@@ -130,7 +146,7 @@ Without a map, start from the object the user's question is about.
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions; a first draw or a redraw uses
    `--layout`, laid out for the fewest crossing arrows), seed the result, and
-   let the user duplicate and drag it into the target encapsulation. No
+   let the user duplicate it and drag the next change into it. No
    arrows from a container to its own parts: nesting is the ownership. Offer
    both arrow styles and let the user pick: **detailed**, one arrow per call
    or file access, labelled with it; **collapsed** (`board.py collapse`),

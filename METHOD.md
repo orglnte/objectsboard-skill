@@ -29,7 +29,7 @@ decided.
 1. **Pick one object.** The one the question is about, or the largest class
    on the path the question touches. Not a package, not the whole system.
 2. **Extract its whole interface and every outside use.**
-   `extract_interface.py --class mod.py:Name --scan tag=dir ... --out data.json`.
+   `extract_interface.py --target mod.py[:Name] --scan tag=dir ... --out data.json`.
    It lists every member (methods, properties, constants, `self.x`
    attributes), grouped by the class's own `# --- name ---` sections, with
    reads inside the class, by production code outside, and by tests.
@@ -79,24 +79,31 @@ decided.
 
 ## The tools
 
-1. **`extract_interface.py`**: the interface and the outside uses as JSON
+1. **`extract_interface.py`**: the interface and the outside uses as JSON,
+   for a module, a class or a function (`--target`)
    (`cls, file, span, classdoc, init_sig, sections, members, uses`).
    Static analysis of Python source: an instance reached through a name it
    does not track is missed (follow factories with `--factory` and
    attributes or properties with `--attr`), so say so on the page.
 2. **`file_contracts.py`**: every quoted mention of the given file names,
    with two lines of context.
-3. **`board.py`**: `check` refuses any arrow whose proof (a file and a
+3. **`trace_uses.py`**: runs the test suite (pytest, in process, Python
+   3.11+) with a profiler and records every call into the target's
+   functions and the caller outside it: the call graph into the target.
+   `--diff data.json` lists, per file, the members seen only at run time
+   (missed by the static scan) and those no test runs.
+4. **`board.py`**: `check` refuses any arrow whose proof (a file and a
    regex) does not match; `build` lays the diagram out, keeping the
    positions of every box the board already has and placing new ones next
    to their main neighbour without overlap, and stamps the revision;
-   `simplify` makes the simplified view.
-4. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
+   `simplify` makes the simplified view. `check` also refuses an arrow
+   between a box and a box nested in it.
+5. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
    Sections: the pseudo-code class; summary counts; findings; ways in; one
    card per caller (route, members used, why, finding); the full member
    table with filters (only used outside, only public unused outside, count
    tests). Clicking a member shows its docstring and every outside site.
-5. **`objects-board.html`**: a diagram editor, published as an artifact with
+6. **`objects-board.html`**: a diagram editor, published as an artifact with
    `capabilities: {db: {}}`.
    1. **Boxes** have a name, a kind (object, module, process, file, folder,
       external), an origin (library, or app: code built on
@@ -124,6 +131,30 @@ decided.
       history resets when another diagram is picked or a remote change
       arrives. Every box has a resize handle at its bottom-right corner
       (always shown on containers and dashed boxes, on hover otherwise).
+
+## What the tools cannot see
+
+Say which of these apply when reporting findings: an absence the tools
+cannot see is not evidence that nothing is there.
+
+1. **Static scan (`extract_interface.py`), class targets:** an instance
+   reached through a name it does not follow (a function returning one that
+   is not given as `--factory`, a parameter under another name, an attribute
+   or property not given as `--attr`); loop and unpacking variables;
+   module-level variables; instances in lists, dicts, callbacks or
+   `**kwargs`; `getattr` with a computed name; uses through a subclass.
+2. **Static scan, module and function targets:** `importlib` or
+   `__import__` with a computed name; a module-level `__getattr__`; names
+   re-exported through another module (target the re-exporting module too).
+3. **Run-time trace (`trace_uses.py`):** code the tests never run, so the
+   call graph is only as complete as the suite's coverage of the code that
+   uses the target; reads of plain attributes, constants and data objects
+   (no function runs); calls in another process (subprocesses the tests
+   start).
+4. **File scan (`file_contracts.py`):** a file name built at run time (only
+   quoted names are matched).
+5. **Everything:** Python only. Other languages need the interface and its
+   uses gathered by hand; the method and the board still apply.
 
 ## Keeping the diagrams true
 

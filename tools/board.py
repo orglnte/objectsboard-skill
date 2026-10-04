@@ -14,7 +14,8 @@ SPEC is the diagram to draw, with the evidence for every arrow:
                 "proof": [{"file": "app/cart.py", "pattern": "order\\\\.total\\\\("}]}]}
 
 check   every edge's proof patterns (regexes) must match in their files,
-        relative to --root; an edge with no proof is refused. Exit 1 on any
+        relative to --root; an edge with no proof, or between a box and a box
+        nested in it (ownership is the nesting, not an arrow), is refused. Exit 1 on any
         failure, listing each.
 build   check, then lay out: a node already in --keep (the diagram as the
         board holds it now, e.g. from `ArtifactData get`) keeps its position
@@ -115,11 +116,24 @@ def place_near(d, i, anchor, gap=40, rings=30):
 
 def check(spec, root):
     ids = {n["id"] for n in spec["nodes"]}
+    parent = {n["id"]: n.get("parent") for n in spec["nodes"]}
+
+    def owns(a, b):
+        p = parent.get(b)
+        while p:
+            if p == a:
+                return True
+            p = parent.get(p)
+        return False
+
     bad = []
     for e in spec["edges"]:
         tag = f"{e['from']} -> {e['to']} ({e.get('label', '')})"
         if e["from"] not in ids or e["to"] not in ids:
             bad.append(f"{tag}: unknown node")
+            continue
+        if owns(e["from"], e["to"]) or owns(e["to"], e["from"]):
+            bad.append(f"{tag}: an arrow between a box and its own part (nesting already says it owns it)")
             continue
         proofs = e.get("proof") or []
         if not proofs:

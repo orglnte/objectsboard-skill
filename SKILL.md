@@ -38,25 +38,32 @@ Without a map, start from the object the user's question is about.
 
 ## Steps
 
-1. Pick ONE object: the one the question is about, or the largest class on
-   its path. Never a package from an import graph alone.
-2. `tools/extract_interface.py`: its whole interface and every outside use
+1. Pick ONE object: the one the question is about, or the largest class or
+   module on its path. In Python everything is an object: a module, a class
+   or a function can be the target (`path/mod.py`, `path/mod.py:Name`). Never
+   a package from an import graph alone.
+2. `tools/extract_interface.py --target`: its whole interface and every outside use
    (add each factory, stand-in, parameter name and attribute or property the
    object travels under: `--factory`, `--stand-in`, `--param-name`,
    `--attr`).
-3. Read every caller; write one sentence per call site on why it calls.
-4. `tools/file_contracts.py`: everything that reads or writes the object's
+3. `tools/trace_uses.py --target`: the run-time cross-check and the call
+   graph into the object, from running the test suite. It lists the uses the
+   static scan missed and the ones no test runs. It needs tests with good
+   coverage of the code that uses the object.
+4. Read every caller; write one sentence per call site on why it calls.
+5. `tools/file_contracts.py`: everything that reads or writes the object's
    files without going through it.
-5. Report the findings as checkable facts with file and line; stop and let
+6. Report the findings as checkable facts with file and line; stop and let
    the user decide.
-6. Publish `tools/objects-board.html` as an artifact with `capabilities: {db:
+7. Publish `tools/objects-board.html` as an artifact with `capabilities: {db:
    {}}`. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions), seed the result, and
    let the user duplicate and drag it into the target encapsulation. Read
    their diagram back before proposing code.
-7. Refactor toward the target one owner at a time, suites green per commit,
+8. Refactor toward the target one owner at a time, suites green per commit,
    and redraw the board after each step.
 
-The method, the tools, the views and the pitfalls are in
-[METHOD.md](METHOD.md). Read it before the first run.
+What each tool cannot see is listed in [METHOD.md](METHOD.md#what-the-tools-cannot-see):
+say so in the findings. The method, the tools, the views and the pitfalls
+are there too. Read it before the first run.

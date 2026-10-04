@@ -10,6 +10,28 @@ sys.path.insert(0, str(TOOLS))
 import board  # noqa: E402
 
 APP = {
+    "app/__init__.py": "",
+    "app/report.py": '''
+from app import store
+from .store import Store as S
+
+
+def show(path):
+    return S(path).get(store.Store.LIMIT)
+''',
+    "tests/test_app.py": '''
+from app.service import Service, run
+from app.store import Store
+from app.report import show
+
+
+def test_run():
+    assert run(Service(Store("p"))) == 3
+
+
+def test_show():
+    assert show("p") == 3
+''',
     "app/store.py": '''
 class Store:
     LIMIT = 3
@@ -53,13 +75,13 @@ def app(tmp_path):
 
 def extract(app, *extra):
     out = app / "data.json"
-    subprocess.run([sys.executable, str(TOOLS / "extract_interface.py"), "--class", "app/store.py:Store",
+    subprocess.run([sys.executable, str(TOOLS / "extract_interface.py"), "--target", "app/store.py:Store",
                     "--scan", "app=app", *extra, "--out", str(out)], cwd=app, check=True, capture_output=True)
     return json.loads(out.read_text())
 
 
 def test_without_attr_a_property_hides_every_use(app):
-    assert extract(app)["uses"] == []
+    assert not [u for u in extract(app)["uses"] if u["file"].endswith("service.py")]
 
 
 def test_attr_follows_the_property_and_a_name_bound_from_it(app):
@@ -109,3 +131,34 @@ def test_simplify_merges_per_pair_and_drops_arrows_into_own_parts():
     s = board.simplify(d)
     assert [(e["from"], e["to"], e["kind"], e["label"]) for e in s["edges"]] == [("b", "a", "writes", "one · two")]
     assert {n["id"] for n in s["nodes"]} == {"a", "b"}
+
+
+def test_module_target_lists_importers_through_alias_from_import_and_relative_import(app):
+    out = app / "mod.json"
+    subprocess.run([sys.executable, str(TOOLS / "extract_interface.py"), "--target", "app/store.py",
+                    "--scan", "app=app", "--out", str(out)], cwd=app, check=True, capture_output=True)
+    d = json.loads(out.read_text())
+    assert d["module"] == "app.store" and {m["name"] for m in d["members"]} == {"Store"}
+    assert {(Path(u["file"]).name, u["via"]) for u in d["uses"]} >= {("report.py", "module.Store"), ("report.py", "name")}
+
+
+def test_trace_records_calls_from_outside_and_not_from_the_class_itself(app):
+    out = app / "trace.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_uses.py"), "--target", "app/store.py:Store",
+                    "--out", str(out), "--", "tests", "-q", "-p", "no:cacheprovider"],
+                   cwd=app, check=True, capture_output=True)
+    d = json.loads(out.read_text())
+    assert d["pytest_exit"] == 0
+    prod = {(Path(u["file"]).name, u["member"]) for u in d["uses"] if not u["test"]}
+    assert ("service.py", "get") in prod and ("report.py", "get") in prod
+    assert ("report.py", "__init__") in prod
+    assert all(u["file"] != "app/store.py" for u in d["uses"])
+
+
+def test_check_refuses_an_arrow_between_a_container_and_its_own_part(app):
+    spec = json.loads(json.dumps(SPEC))
+    spec["nodes"].append({"id": "part", "name": "Store.reader", "kind": "object", "parent": "store"})
+    spec["edges"].append({"from": "store", "to": "part", "kind": "calls", "label": "read",
+                          "proof": [{"file": "app/store.py", "pattern": "def get"}]})
+    bad = board.check(spec, app)
+    assert len(bad) == 1 and "own part" in bad[0]

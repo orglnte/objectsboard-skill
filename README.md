@@ -16,6 +16,9 @@ then use objectsboard to make the objects match it.
 Python only for now: the extractor parses Python source. The method and the
 board apply to any language.
 
+What each tool cannot see is listed in `METHOD.md`, "What the tools cannot
+see".
+
 ## Install
 
 ```sh
@@ -30,16 +33,20 @@ Then `/objectsboard` in Claude Code.
 1. `SKILL.md`: when to use it and the steps.
 2. `METHOD.md`: the method, the tools, keeping the diagrams true, the views,
    the pitfalls.
-3. `tools/extract_interface.py`: a class's whole interface and every outside
-   use, as JSON, following factories, parameters, stand-ins and attributes or
-   properties that hold an instance (Python only).
-4. `tools/file_contracts.py`: every mention of given file names, to find
+3. `tools/extract_interface.py`: an object's whole interface and every
+   outside use, as JSON, for a module, a class or a function; for classes it
+   follows factories, parameters, stand-ins and attributes or properties that
+   hold an instance.
+4. `tools/trace_uses.py`: the run-time cross-check and the call graph into
+   the object, recorded while the test suite runs (needs good test coverage;
+   Python 3.11+).
+5. `tools/file_contracts.py`: every mention of given file names, to find
    what goes around an object through its files.
-5. `tools/build_audit.py` + `tools/interface-audit.template.html`: the audit
+6. `tools/build_audit.py` + `tools/interface-audit.template.html`: the audit
    page (the class as pseudo code, each caller and why it calls).
-6. `tools/board.py`: checks every arrow's proof against the code, lays a
-   diagram out keeping the board's existing positions, and makes the
-   simplified view.
-7. `tools/objects-board.html`: the board, published as a claude.ai artifact
+7. `tools/board.py`: checks every arrow's proof against the code, lays a
+   diagram out keeping the board's existing positions, refuses an arrow into
+   a box's own parts, and makes the simplified view.
+8. `tools/objects-board.html`: the board, published as a claude.ai artifact
    with a shared database (`capabilities: {db: {}}`).
-8. `tests/`: `python3 -m pytest tests -q`.
+9. `tests/`: `python3 -m pytest tests -q`.

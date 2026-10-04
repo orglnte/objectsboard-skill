@@ -66,6 +66,10 @@ arrow is a bypass.
    subclass folds into its base.
 5. Everything else is external.
 
+**The criterion:** one owner per part and per datum; everything else goes
+through the owner (information hiding, the aggregate root, the Law of
+Demeter; see METHOD.md).
+
 **Usage only shows what is wrong, in the warning colour:**
 
 1. **Bypass arrows:** an arrow from outside an owner straight into one of its

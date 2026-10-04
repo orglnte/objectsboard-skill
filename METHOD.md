@@ -15,6 +15,33 @@ where the user draws the target. The tools are in `tools/`.
    collide (one name, two meanings; two names, one meaning) are listed next
    to the map, in a TODO file: they are the first candidates to fix.
 
+## The criterion: one owner per part and per datum
+
+Every part (a module, a helper, a nested class) and every datum (a file, a
+folder, an external system's state) has exactly one owner, and everything
+else reaches it only through that owner. A concept class with its parts and
+its data is one unit; the class is its root. A red arrow on the board is an
+access that goes around the owner.
+
+It is three established rules seen together:
+
+1. **Information hiding:** an owner hides its design decisions (its data's
+   layout, its helpers) behind its interface, so they can change without
+   breaking callers. An arrow into a part or a resource depends on what
+   should be hidden.
+2. **The aggregate root** (Domain-Driven Design): a cluster of objects is
+   one unit, outside code holds a reference to the root only, and every
+   change goes through it. A red arrow is an aggregate-boundary violation.
+3. **The Law of Demeter:** code talks to its immediate collaborators, not
+   through them to their internals. Bypass arrows are its violations at
+   module level.
+
+What this skill adds: placement comes from structure and the concept map,
+never from usage, so the boundary is declared, not inferred from who
+happens to call what; usage only marks the crossings. Where the map, the
+folder and the usage name different owners, the box is a doubt for the user
+to settle in the map.
+
 ## Why one object at a time
 
 An import graph shows modules and imports only; a refactor planned from it

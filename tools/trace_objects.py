@@ -3,7 +3,7 @@
 graph of a whole codebase, one arrow per pair of objects.
 
     trace_objects.py --root path/to/pkg --out objects.json [--spec board.json] \
-        [--tests-dir tests] -- <pytest arguments>
+        [--worklist worklist.txt] [--tests-dir tests] -- <pytest arguments>
 
 An object is a class, or a module that has functions of its own (in Python a
 module is an object too). Every function under --root belongs to one: a
@@ -11,6 +11,15 @@ method to its class, a top-level function to its module. The profiler
 records each call from one object into another; calls inside one object are
 not recorded. Closures (decorator wrappers, lambdas) and frames outside the
 project are walked past, so a call is charged to the object that made it.
+
+--worklist FILE (with --spec) writes the bypasses as the refactoring
+worklist: one entry per part reached around its owner, the most bypassed
+first, with every arrow that reaches it and its call sites as file:line,
+read from the code (the imports naming the part, and the uses of its class
+name, of names imported from it and of the members called; data: the lines
+matching the resource's pattern). An attribute is matched by name, so a
+same-named attribute of another object can show up. Route the first entry through its owner,
+re-run, take the next.
 
 --spec also lists the moves: each external module whose only concept-class
 user is one class is proposed to move into it (its other users, external
@@ -450,7 +459,7 @@ def spec_of(objs, edges, root, concepts=None):
         proof = ({"file": caller_file, "pattern": pattern} if named
                  else {"observed": "called at run time through a subclass, a callback or an injected function"})
         E.append({"from": a, "to": b, "kind": "calls", "label": label + ("" if named else "  [run time only]"),
-                  "proof": [proof]})
+                  "members": ms, "proof": [proof]})
     # 6: bypasses, from imports and from the run
     imp = importers(root)
     moves = {}
@@ -590,6 +599,83 @@ def spec_of(objs, edges, root, concepts=None):
     return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)]}
 
 
+def worklist(spec):
+    """The bypasses as a refactoring worklist: one entry per part reached
+    around its owner, the most bypassed first, each with every arrow that
+    reaches it and its call sites (file:line)."""
+    N = {n["id"]: n for n in spec["nodes"]}
+
+    def top(i):
+        while N.get(i, {}).get("parent"):
+            i = N[i]["parent"]
+        return i
+
+    def owner(part):
+        if part.startswith("resource:"):
+            return N[part]["note"].removeprefix("owner: ")
+        return N[top(part)]["name"]
+
+    def code_sites(file, members, callee):
+        """Lines of `file` that use the callee: an import naming it, its class
+        name, a name imported from it, or an attribute access to a member."""
+        try:
+            tree = ast.parse(Path(file).read_text(errors="replace"))
+        except (OSError, SyntaxError):
+            return None
+        stem = Path(callee["note"].split("  ")[0]).stem
+        cls = callee["name"].split(".")[-1]
+        lines, imported = set(), set()
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                mod = getattr(n, "module", None) or ""
+                names = [x.name for x in n.names]
+                if stem in mod.split(".") or any(stem in x.split(".") or x == cls for x in names):
+                    lines.add(n.lineno)
+                    imported |= {x.asname or x.name for x in n.names if x.name in members or x.name == cls}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and n.attr in members:
+                lines.add(n.lineno)
+            elif isinstance(n, ast.Name) and (n.id in imported or n.id == cls):
+                lines.add(n.lineno)
+        return [f"{file}:{i}" for i in sorted(lines)]
+
+    def sites(e):
+        out = []
+        for p in e["proof"]:
+            if "file" not in p:
+                out.append("run time only")
+                continue
+            got = None
+            if not e["to"].startswith("resource:"):
+                got = code_sites(p["file"], {m for m in e.get("members", []) if not m.startswith("__")}, N[e["to"]])
+            if got is None:
+                try:
+                    lines = Path(p["file"]).read_text(errors="replace").splitlines()
+                except OSError:
+                    continue
+                got = [f"{p['file']}:{i}" for i, ln in enumerate(lines, 1)
+                       if not ln.lstrip().startswith("#") and re.search(p["pattern"], ln)]
+            out += got
+        return out
+
+    groups = {}
+    for e in spec["edges"]:
+        if e.get("flag", "").startswith("bypass"):
+            g = groups.setdefault(e["to"], {"part": N[e["to"]]["name"], "owner": owner(e["to"]), "arrows": []})
+            g["arrows"].append({"from": N.get(e["from"], {"name": e["from"]})["name"],
+                                "uses": e["label"].replace("  [run time only]", ""), "sites": sites(e)})
+    return sorted(groups.values(), key=lambda g: (-len(g["arrows"]), -sum(len(a["sites"]) for a in g["arrows"]), g["part"]))
+
+
+def print_worklist(items, out=sys.stdout):
+    for i, g in enumerate(items, 1):
+        print(f"{i}. {g['part']} (owner {g['owner']}): {len(g['arrows'])} bypass(es); route each through {g['owner']}", file=out)
+        for a in g["arrows"]:
+            print(f"   from {a['from']}: {a['uses']}", file=out)
+            for s in a["sites"]:
+                print(f"      {s}", file=out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True)
@@ -597,6 +683,8 @@ def main():
     ap.add_argument("--spec")
     ap.add_argument("--concepts", help="the concept map (markdown); its Objects column picks the classes drawn")
     ap.add_argument("--tests-dir", default="tests")
+    ap.add_argument("--worklist", metavar="FILE",
+                    help="with --spec: write the bypasses as a refactoring worklist, the most bypassed part first")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER)
     a = ap.parse_args()
     args = a.pytest_args[1:] if a.pytest_args[:1] == ["--"] else a.pytest_args
@@ -615,6 +703,9 @@ def main():
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
             print(f"move {m['module']} into {m['into']}: {m['why']}", file=sys.stderr)
+        if a.worklist:
+            with open(a.worklist, "w") as out:
+                print_worklist(worklist(spec), out)
     print(f"{len({e['from'] for e in edges} | {e['to'] for e in edges})} objects, {len(edges)} object pairs; "
           f"pytest exit {rc}", file=sys.stderr)
     return 0

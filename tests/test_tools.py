@@ -319,3 +319,28 @@ def test_legitimate_calls_between_two_owners_are_one_arrow(tmp_path):
         os.chdir(cwd)
     into_shape = [(e["from"], e["to"]) for e in s["edges"] if e["to"] == "lib/shapes.py:Shape"]
     assert into_shape == [("lib/report/report.py:Report", "lib/shapes.py:Shape")]   # Report and its part: one arrow
+
+
+def test_worklist_ranks_the_most_bypassed_part_first_with_its_call_sites(tmp_path):
+    import trace_objects
+    files = dict(REPR, **{"lib/cli.py": "from lib.report import fmt\n\n\ndef main():\n    print(fmt.fmt(1))\n"})
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(MAP)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        edges = [{"from": "lib/report/report.py:Report", "to": "lib/report/fmt.py", "members": ["fmt"]},
+                 {"from": "lib/util.py", "to": "lib/report/fmt.py", "members": ["fmt"]},
+                 {"from": "lib/cli.py", "to": "lib/report/fmt.py", "members": ["fmt"]}]
+        w = trace_objects.worklist(trace_objects.spec_of(objs, edges, "lib", "MAP.md"))
+    finally:
+        os.chdir(cwd)
+    assert [(g["part"], g["owner"], len(g["arrows"])) for g in w] == [
+        ("fmt.py", "Report", 2), ("out/", "Report", 1)]                     # two arrows around Report first
+    by = {a["from"]: a["sites"] for a in w[0]["arrows"]}
+    assert by == {"cli.py": ["lib/cli.py:1", "lib/cli.py:5"], "util.py": ["lib/util.py:3", "lib/util.py:8"]}
+    assert w[1]["arrows"][0]["sites"] == ["lib/util.py:7"]                  # the data reached directly

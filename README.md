@@ -49,7 +49,8 @@ Then `/objectsboard` in Claude Code.
 4. `tools/trace_objects.py`: the objects representation of a whole
    codebase: its concept classes, one arrow per pair of classes that call
    each other, modules not encapsulated by a class as external boxes; from
-   the test suite's run and the source.
+   the test suite's run and the source. `--worklist` ranks the bypasses
+   into the refactoring order, with their call sites.
 5. `tools/trace_uses.py`: the run-time cross-check and the call graph into
    the object, recorded while the test suite runs (needs good test coverage;
    Python 3.11+).

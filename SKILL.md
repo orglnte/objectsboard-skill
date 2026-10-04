@@ -79,8 +79,10 @@ makes it.
 
 1. **Bypass arrows:** an arrow from outside an owner straight into one of its
    parts (a module or a nested class) goes around the owner's interface.
-   These are the refactoring worklist: route each through the owner, one per
-   commit, suites green, then redraw.
+   These are the refactoring worklist: `trace_objects.py --worklist FILE`
+   ranks the bypassed parts, the most bypassed first, each with its call
+   sites (file:line). Take the first entry, route its callers through the
+   owner, one commit, suites green, re-run, redraw, take the next.
 2. **Flagged boxes:** a part called directly from outside its owner, and a
    misplaced module (in an owner's folder, but owned by no class).
 3. **Doubts, flagged in place (no extra box):** the concept map and the

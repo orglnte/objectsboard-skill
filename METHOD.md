@@ -123,7 +123,10 @@ decided.
    the concept map whose Objects column picks the classes drawn; `--spec`
    writes the board spec. An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
-   with the observation as proof.
+   with the observation as proof. `--worklist FILE` writes the bypasses as
+   the refactoring worklist: one entry per part reached around its owner,
+   the most bypassed first, with every arrow into it and its call sites
+   (file:line, read from the code's imports, names and attributes).
 4. **`trace_uses.py`**: runs the test suite (pytest, in process, under the
    project's own interpreter) with a profiler and records every call into the target's
    functions and the caller outside it: the call graph into the target.

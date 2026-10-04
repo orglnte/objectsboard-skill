@@ -344,3 +344,80 @@ def test_worklist_ranks_the_most_bypassed_part_first_with_its_call_sites(tmp_pat
     by = {a["from"]: a["sites"] for a in w[0]["arrows"]}
     assert by == {"cli.py": ["lib/cli.py:1", "lib/cli.py:5"], "util.py": ["lib/util.py:3", "lib/util.py:8"]}
     assert w[1]["arrows"][0]["sites"] == ["lib/util.py:7"]                  # the data reached directly
+
+
+FACTORY = {
+    "lib/__init__.py": "",
+    "lib/engine.py": '''
+class Engine:
+    def go(self):
+        return 1
+
+
+class FastEngine(Engine):
+    pass
+''',
+    "lib/pick.py": '''
+from lib.engine import FastEngine
+
+
+def pick(fast):
+    return FastEngine() if fast else None
+''',
+    "lib/runner.py": '''
+from lib.pick import pick
+
+
+class Runner:
+    def __init__(self):
+        self.engine = pick(True)
+
+    def run(self):
+        return self.engine.go()
+''',
+}
+FACTORY_MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"
+               "| Runner | runs | - | `Runner` | running |\n| Engine | works | - | `Engine` | work |\n")
+
+
+def test_a_class_kept_through_a_factory_function_nests_in_its_keeper(tmp_path):
+    import trace_objects
+    for rel, text in FACTORY.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(FACTORY_MAP)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        assert trace_objects.owners("lib", objs) == {"lib/engine.py:FastEngine": "lib/runner.py:Runner"}
+        edges = [{"from": "lib/runner.py:Runner", "to": "lib/engine.py:Engine", "members": ["go"]}]
+        s = trace_objects.spec_of(objs, edges, "lib", "MAP.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/engine.py:Engine"]["parent"] == "lib/runner.py:Runner"   # the subclass folds into its base
+
+
+def test_a_kept_helper_class_does_not_make_its_files_class_owned(tmp_path):
+    import trace_objects
+    files = dict(FACTORY, **{"lib/engine.py": FACTORY["lib/engine.py"] + "\n\nclass Note:\n    pass\n",
+                             "lib/runner.py": FACTORY["lib/runner.py"].replace(
+                                 "self.engine = pick(True)", "self.note = Note()").replace(
+                                 "from lib.pick import pick", "from lib.engine import Note")})
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(FACTORY_MAP)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        edges = [{"from": "lib/runner.py:Runner", "to": "lib/engine.py:Engine", "members": ["go"]}]
+        s = trace_objects.spec_of(objs, edges, "lib", "MAP.md")
+    finally:
+        os.chdir(cwd)
+    parents = {n["id"]: n.get("parent") for n in s["nodes"]}
+    assert "lib/engine.py:Engine" in parents and parents["lib/engine.py:Engine"] is None

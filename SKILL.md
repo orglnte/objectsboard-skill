@@ -62,8 +62,9 @@ arrow is a bypass.
 3. The package names its class: any other module belongs to the concept
    class named after its folder (`cell/` -> Cell), or the nearest enclosing
    folder's, never the root's.
-4. A concept class created and kept by exactly one other nests in it; a
-   subclass folds into its base.
+4. A concept class created and kept by exactly one other nests in it
+   (`self.x = Other(...)`, or `self.x = make(...)` where the project
+   function `make` returns `Other(...)`); a subclass folds into its base.
 5. Everything else is external.
 
 **The criterion:** one owner per part and per datum; everything else goes

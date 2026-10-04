@@ -116,22 +116,51 @@ def run(root, pytest_args, tests_dir):
     return rc, hits, objs
 
 
+def _called_name(call):
+    f = call.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+
+
+def _top_calls(expr):
+    """The calls an expression evaluates to: itself, or the branches of
+    `a or b` and `a if c else b`; never a call nested in an argument."""
+    if isinstance(expr, ast.Call):
+        return [expr]
+    if isinstance(expr, ast.BoolOp):
+        return [c for v in expr.values for c in _top_calls(v)]
+    if isinstance(expr, ast.IfExp):
+        return _top_calls(expr.body) + _top_calls(expr.orelse)
+    return []
+
+
 def owners(root, objs):
     """{class id: owner class id} for a class created and kept by exactly one
     other class (`self.x = Other(...)` in its body, also inside `a or b` and
-    `a if c else b`). A class kept by several owners has none: it is shared."""
+    `a if c else b`, or `self.x = make(...)` where `make` is a project
+    function whose `return Other(...)` builds it). A class kept by several
+    owners has none: it is shared."""
     by_name = {}
     for oid, o in objs.items():
         if o["kind"] == "class":
             by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
-    kept = {}
+    trees = []
     for p in sorted(Path(root).rglob("*.py")):
         if "__pycache__" in p.parts:
             continue
         try:
-            t = ast.parse(p.read_text())
+            trees.append((p, ast.parse(p.read_text())))
         except (SyntaxError, UnicodeDecodeError):
             continue
+    makes = {}                                # factory name -> class names its returns build
+    for _, t in trees:
+        for fn in [n for n in ast.walk(t) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            if fn.name in by_name:
+                continue
+            for r in [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]:
+                makes.setdefault(fn.name, set()).update(
+                    nm for c in _top_calls(r.value) if (nm := _called_name(c)) in by_name)
+    kept = {}
+    for p, t in trees:
         for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
             owner = f"{p}:{c.name}"
             if owner not in objs:
@@ -144,9 +173,9 @@ def owners(root, objs):
                            for x in targets) or n.value is None:
                     continue
                 for call in [x for x in ast.walk(n.value) if isinstance(x, ast.Call)]:
-                    f = call.func
-                    name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
-                    for kid in by_name.get(name, []):
+                    name = _called_name(call)
+                    names = [name] if name in by_name else sorted(makes.get(name, ()))
+                    for kid in (k for nm in names for k in by_name.get(nm, [])):
                         if kid != owner:
                             kept.setdefault(kid, set()).add(owner)
     return {k: next(iter(v)) for k, v in kept.items() if len(v) == 1}
@@ -318,8 +347,9 @@ def spec_of(objs, edges, root, concepts=None):
     3. The package names its class: any other module belongs to the concept
        class named after its folder (`cell/` -> Cell, `variants/` ->
        Variant), or the nearest enclosing folder's; never the root's.
-    4. A concept class created and kept by exactly one other nests in it; a
-       subclass folds into its base.
+    4. A concept class created and kept by exactly one other nests in it
+       (`self.x = Other(...)`, or through a project factory function whose
+       `return Other(...)` builds it); a subclass folds into its base.
     5. Everything else is external.
     6. A use of an owned module or class from outside its owner is a bypass,
        listed as a move. One arrow per pair of boxes."""
@@ -375,7 +405,7 @@ def spec_of(objs, edges, root, concepts=None):
         return None
 
     # every traced object -> the box it is drawn in, and that box's owner
-    box, parent = {}, {}
+    box, parent, sub_of = {}, {}, {}
     for oid, o in objs.items():
         if oid in keep:
             box[oid] = oid
@@ -389,7 +419,7 @@ def spec_of(objs, edges, root, concepts=None):
         if o["kind"] == "class":
             base = next((byname[b] for b in facts.get(oid, {}).get("bases", []) if b in byname and byname[b] in keep), None)
             if base:
-                box[oid] = base
+                box[oid] = sub_of[oid] = base
                 continue
         owner, rule = owner_of_file(o["file"])
         if rule == 2:
@@ -399,11 +429,15 @@ def spec_of(objs, edges, root, concepts=None):
             parent[o["file"]] = owner
         else:
             box[oid] = o["file"]              # external
-    kept_by = owners(root, objs)
+    kept_by = {}                              # a kept subclass keeps its base
+    for k, o in owners(root, objs).items():
+        kb, ob = sub_of.get(k, k), box.get(o, o)
+        if kb in keep and ob in keep and kb != ob:
+            kept_by.setdefault(kb, set()).add(ob)
     for k in sorted(keep):                    # 4a: composition
-        o = kept_by.get(k)
-        if o in keep and o != k and k not in parent:
-            parent[k] = o
+        o = kept_by.get(k, set())
+        if len(o) == 1 and k not in parent:
+            parent[k] = next(iter(o))
     pairs = {}
     for e in edges:
         a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])

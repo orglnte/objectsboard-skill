@@ -252,7 +252,8 @@ cannot see is not evidence that nothing is there.
    arrow from every box whose code reaches one directly (a bypass unless it
    is the owner). Placement from structure and the concept map: the map's
    consistent declarations, then the file's concept class, then the
-   package's (named after its folder, never the root), composition and
+   package's (named after its folder, never the root), composition (a class
+   kept as `self.x`, built directly or by a project factory function) and
    subclassing between classes; usage never moves a box. Usage flags, in the
    warning colour, the arrows that bypass an owner's interface, the
    misplaced modules and the doubts (map and folder disagree, the map's rows

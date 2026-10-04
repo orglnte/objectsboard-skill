@@ -1,0 +1,622 @@
+<title>Objects Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600&display=swap">
+<style>
+  /* layout: a full-height canvas with a toolbar on top and an inspector on the right (below the canvas on phones) */
+  :root {
+    --bg: #eceff1; --canvas: #f7f8f9; --grid: #e1e5e8; --panel: #ffffff; --ink: #1a1f24; --ink-2: #4b5560; --ink-3: #87909a;
+    --rule: #d0d6dc; --accent: #2563a6; --accent-fill: #dde9f6; --sel: #e0731b;
+    --k-object: #2563a6; --k-object-fill: #e6eef8; --k-module: #5b6b7a; --k-module-fill: #f2f4f6;
+    --k-file: #7c5a12; --k-file-fill: #faf3e2; --k-process: #6a4fa3; --k-process-fill: #f1edf9;
+    --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6;
+    --e-calls: #2563a6; --e-reads: #2f8a57; --e-writes: #c2410c; --e-spawns: #6a4fa3;
+    --exp: #b45309;
+    --sans: "Fira Sans", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111417; --canvas: #161a1e; --grid: #1f252b; --panel: #1b2025; --ink: #e5e9ed; --ink-2: #a7b0ba; --ink-3: #6f7882;
+      --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #f59e0b;
+      --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
+      --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
+      --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
+      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111417; --canvas: #161a1e; --grid: #1f252b; --panel: #1b2025; --ink: #e5e9ed; --ink-2: #a7b0ba; --ink-3: #6f7882;
+    --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #f59e0b;
+    --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
+    --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
+    --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
+    --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; }
+  .app { height: 100%; display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) 340px; }
+  @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 62vh auto; height: auto; } }
+  .bar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; padding: .5rem 16px;
+         background: var(--panel); border-bottom: 1px solid var(--rule); }
+  .bar h1 { font-size: 1rem; margin: 0 .4rem 0 0; font-weight: 600; letter-spacing: -.01em; }
+  .bar .grp { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: .28rem .6rem; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button.danger { color: #c2410c; }
+  button.armed { background: #c2410c; border-color: #c2410c; color: #fff; }
+  select, input[type=text], textarea { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: .28rem .45rem; min-width: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .status { margin-left: auto; font-family: var(--mono); font-size: .72rem; color: var(--ink-3); }
+  .status.warn { color: #c2410c; }
+  .kinds { display: flex; gap: .3rem; flex-wrap: wrap; }
+  .kt { display: inline-flex; gap: .3rem; align-items: center; font-size: .8rem; padding: .15rem .45rem; border: 1px solid var(--rule); border-radius: 99px; cursor: pointer; user-select: none; }
+  .kt i { width: 14px; height: 0; border-top: 2px solid var(--c); display: inline-block; }
+  .kt.dash i { border-top-style: dashed; }
+  .kt.off { opacity: .4; }
+
+  .stage { position: relative; overflow: hidden; background: var(--canvas); min-height: 0; touch-action: none; }
+  svg#cv { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
+  svg#cv.panning { cursor: grabbing; }
+  svg#cv.connecting { cursor: crosshair; }
+  .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: .3rem; }
+  .hintline { position: absolute; left: 12px; bottom: 12px; font-size: .78rem; color: var(--ink-3); background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: .2rem .5rem; max-width: calc(100% - 180px); }
+
+  aside { background: var(--panel); border-left: 1px solid var(--rule); overflow: auto; padding: .8rem 16px 2rem; display: flex; flex-direction: column; gap: .8rem; min-width: 0; }
+  @media (max-width: 860px) { aside { border-left: 0; border-top: 1px solid var(--rule); } }
+  aside h2 { font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); margin: 0; font-weight: 600; }
+  aside label { font-size: .76rem; color: var(--ink-3); display: block; margin-bottom: .2rem; }
+  aside .f { display: flex; flex-direction: column; }
+  aside textarea { font-family: var(--mono); font-size: .76rem; line-height: 1.5; min-height: 9rem; resize: vertical; }
+  aside .row { display: flex; gap: .4rem; flex-wrap: wrap; }
+  aside .row > * { flex: 1 1 auto; }
+  aside p { margin: 0; font-size: .82rem; color: var(--ink-2); }
+  ul.rel { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: .72rem; display: flex; flex-direction: column; gap: .2rem; }
+  ul.rel li { overflow-wrap: anywhere; color: var(--ink-2); cursor: pointer; }
+  ul.rel li:hover { color: var(--ink); }
+  ul.rel b { font-weight: 500; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: .3rem; border: 1.5px solid var(--c); background: var(--f); }
+
+  /* svg */
+  .node rect.box { stroke-width: 1.4; }
+  .node.sel rect.box { stroke: var(--sel) !important; stroke-width: 2.4; }
+  .node.dim { opacity: .28; }
+  .node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink); }
+  .node text.title { font-family: var(--sans); font-size: 13px; font-weight: 600; }
+  .node text.kind { font-size: 9.5px; fill: var(--ink-3); letter-spacing: .06em; }
+  .node text.priv { fill: #c2410c; }
+  .node text.note { font-family: var(--sans); font-size: 11px; fill: var(--ink-3); font-style: italic; }
+  .node .exp { fill: var(--exp); font-size: 9.5px; }
+  .node .rz { fill: var(--ink-3); opacity: 0; cursor: nwse-resize; }
+  .node .rz.shown { opacity: .45; }
+  .node:hover .rz, .node.sel .rz, .node .rz:hover { opacity: .9; }
+  .node.droptarget rect.box { stroke: var(--accent) !important; stroke-dasharray: 5 3; stroke-width: 2.2; }
+  .edge path { fill: none; stroke-width: 1.4; }
+  .edge.dim { opacity: .1; }
+  .edge.hl path { stroke-width: 2.4; }
+  .edge.sel path { stroke-width: 3; }
+  .edge text { font-family: var(--mono); font-size: 10px; fill: var(--ink-2); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; }
+  .edge .hit { stroke: transparent; stroke-width: 12; fill: none; cursor: pointer; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <div class="bar">
+    <h1>Objects Board</h1>
+    <div class="grp">
+      <select id="dsel" aria-label="Diagram"></select>
+      <button id="dnew" type="button">New</button>
+      <button id="ddup" type="button">Duplicate</button>
+    </div>
+    <div class="grp">
+      <button id="addnode" type="button">+ Box</button>
+      <button id="connect" type="button" title="Click a source box, then a target box">Connect</button>
+    </div>
+    <div class="grp">
+      <button id="undo" type="button" title="Undo (Ctrl/⌘ Z)">Undo</button>
+      <button id="redo" type="button" title="Redo (Ctrl/⌘ Shift Z)">Redo</button>
+    </div>
+    <div class="kinds" id="kinds"></div>
+    <div class="grp">
+      <button id="edgemode" type="button" title="Show every arrow, or only the selected box's">All arrows</button>
+      <button id="showlabels" type="button" class="on">Labels</button>
+    </div>
+    <span class="status" id="status">loading…</span>
+  </div>
+  <div class="stage" id="stage">
+    <svg id="cv" role="img" aria-label="Diagram canvas">
+      <defs id="defs"></defs>
+      <rect id="bg" x="-100000" y="-100000" width="200000" height="200000" fill="url(#gridpat)"></rect>
+      <g id="world"><g id="gnodes"></g><g id="gedges"></g></g>
+    </svg>
+    <div class="hintline" id="hint">Drag a box to move it; drop it inside another to make it owned; drag a box's corner to resize it. Ctrl/⌘ Z undoes. Drag the background to pan, scroll to zoom.</div>
+    <div class="zoom"><button id="zout" type="button" aria-label="Zoom out">−</button><button id="zfit" type="button">Fit</button><button id="zin" type="button" aria-label="Zoom in">+</button></div>
+  </div>
+  <aside id="side"></aside>
+</div>
+
+<script>
+const KINDS = ["object", "module", "process", "file", "folder", "external"];
+const EKINDS = [
+  { k: "calls", label: "calls", dash: "" },
+  { k: "reads", label: "reads", dash: "5 4" },
+  { k: "writes", label: "writes", dash: "" },
+  { k: "spawns", label: "spawns", dash: "2 4" },
+];
+const S = {
+  db: null, local: false, list: [], did: null, d: null, saving: false, dirty: false, saveTimer: null,
+  sel: null, selEdge: null, connectFrom: null, connecting: false, edgeOnlySel: false, labels: true,
+  hide: new Set(), view: { x: 0, y: 0, k: 0.75 }, drag: null, armed: null,
+  undo: [], redo: [], base: null,
+};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const nid = p => p + Math.random().toString(36).slice(2, 8);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+/* ---------- geometry ---------- */
+const mctx = document.createElement("canvas").getContext("2d");
+function tw(text, font) { mctx.font = font; return mctx.measureText(text).width; }
+const F_TITLE = "600 13px 'Fira Sans', sans-serif", F_MONO = "11.5px 'Fira Code', monospace", F_NOTE = "italic 11px 'Fira Sans', sans-serif";
+const PAD = 10, HEAD = 34, LINE = 17, CPAD = 14;
+const byId = () => Object.fromEntries(S.d.nodes.map(n => [n.id, n]));
+function children(id) { return S.d.nodes.filter(n => n.parent === id); }
+function depth(n, B) { let d = 0, p = n.parent; while (p && B[p] && d < 20) { d++; p = B[p].parent; } return d; }
+function isDesc(a, b, B) { let p = B[a] && B[a].parent, i = 0; while (p && i++ < 50) { if (p === b) return true; p = B[p] && B[p].parent; } return false; }
+function ownSize(n) {
+  const lines = n.collapsed ? [] : n.members;
+  let w = Math.max(150, tw(n.name, F_TITLE) + 70);
+  for (const m of lines) w = Math.max(w, tw((m.vis === " " ? "" : m.vis + " ") + m.name, F_MONO) + PAD * 2 + 4);
+  if (n.note && !n.collapsed) w = Math.max(w, Math.min(340, tw(n.note, F_NOTE) + PAD * 2));
+  const h = HEAD + lines.length * LINE + (n.note && !n.collapsed ? LINE : 0) + (lines.length || (n.note && !n.collapsed) ? 6 : 0);
+  return { w: Math.ceil(w), h: Math.ceil(h) };
+}
+function layoutBounds() {
+  const B = byId(), out = {};
+  const calc = n => {
+    if (out[n.id]) return out[n.id];
+    const s = ownSize(n);
+    let x0 = n.x, y0 = n.y, x1 = n.x + Math.max(s.w, n.w || 0), y1 = n.y + Math.max(s.h, n.h || 0);
+    for (const c of children(n.id)) {
+      const b = calc(c);
+      x0 = Math.min(x0, b.x - CPAD); y0 = Math.min(y0, b.y - CPAD - 4); x1 = Math.max(x1, b.x + b.w + CPAD); y1 = Math.max(y1, b.y + b.h + CPAD);
+    }
+    out[n.id] = { x: x0, y: y0, w: x1 - x0, h: y1 - y0, own: s };
+    return out[n.id];
+  };
+  for (const n of S.d.nodes) calc(n);
+  return out;
+}
+
+/* ---------- render ---------- */
+function kindColors(k) { return { s: `var(--k-${k})`, f: `var(--k-${k}-fill)` }; }
+function edgeVisible(e) {
+  if (S.hide.has(e.kind)) return false;
+  if (S.edgeOnlySel && S.sel) return e.from === S.sel || e.to === S.sel;
+  if (S.edgeOnlySel && !S.sel) return false;
+  return true;
+}
+function clip(b, tx, ty) {
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2, dx = tx - cx, dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const sx = (b.w / 2) / Math.abs(dx || 1e-9), sy = (b.h / 2) / Math.abs(dy || 1e-9), s = Math.min(sx, sy);
+  return { x: cx + dx * s, y: cy + dy * s };
+}
+function render() {
+  if (!S.d) return;
+  const B = byId(), L = layoutBounds();
+  const rel = new Set();
+  if (S.sel) for (const e of S.d.edges) if (edgeVisible(e) && (e.from === S.sel || e.to === S.sel)) { rel.add(e.from); rel.add(e.to); }
+  const dragged = x => S.drag && S.drag.id && (x.id === S.drag.id || isDesc(x.id, S.drag.id, B)) ? 1 : 0;
+  const order = [...S.d.nodes].sort((a, b) => (dragged(a) - dragged(b)) || (depth(a, B) - depth(b, B)));
+  let g = "";
+  for (const n of order) {
+    const b = L[n.id], c = kindColors(n.kind), cont = children(n.id).length > 0;
+    const dim = S.sel && S.edgeOnlySel === false && rel.size && !rel.has(n.id) && n.id !== S.sel && !isDesc(S.sel, n.id, B) && !isDesc(n.id, S.sel, B) && !cont;
+    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : ""].join(" ");
+    const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : "";
+    g += `<g class="${cls}" data-n="${esc(n.id)}" transform="translate(${b.x},${b.y})">
+      <rect class="box" width="${b.w}" height="${b.h}" rx="${n.kind === "file" ? 2 : 6}" style="fill:${cont ? `var(--k-${n.kind}-fill)` : c.f};stroke:${c.s}${cont ? ";fill-opacity:.55" : ""}"${dash}></rect>`;
+    const ox = n.x - b.x, oy = n.y - b.y;
+    g += `<text class="title" x="${ox + PAD}" y="${oy + 21}">${esc(n.name)}</text>`;
+    g += `<text class="kind" x="${b.w - PAD}" y="${oy + 14}" text-anchor="end">${esc(n.kind.toUpperCase())}${n.collapsed && n.members.length ? " +" + n.members.length : ""}</text>`;
+    if (n.origin === "app") g += `<text class="exp" x="${b.w - PAD}" y="${oy + 27}" text-anchor="end">APP</text>`;
+    let y = oy + HEAD + 10;
+    if (!n.collapsed) {
+      for (const m of n.members) {
+        g += `<text class="${m.vis === "-" ? "priv" : ""}" x="${ox + PAD}" y="${y}">${esc((m.vis === " " ? "" : m.vis + " ") + m.name)}</text>`;
+        y += LINE;
+      }
+      if (n.note) g += `<text class="note" x="${ox + PAD}" y="${y}">${esc(n.note.length > 60 ? n.note.slice(0, 58) + "…" : n.note)}</text>`;
+    }
+    g += `<path class="rz${cont || dash ? " shown" : ""}" data-rz="${esc(n.id)}" d="M${b.w - 2},${b.h - 16} L${b.w - 2},${b.h - 2} L${b.w - 16},${b.h - 2} Z"></path>`;
+    g += `</g>`;
+  }
+  $("gnodes").innerHTML = g;
+
+  /* edges: parallel edges between the same pair are fanned out */
+  const pairIdx = {};
+  let eg = "";
+  for (const e of S.d.edges) {
+    if (!B[e.from] || !B[e.to] || !edgeVisible(e)) continue;
+    const key = [e.from, e.to].sort().join("|");
+    pairIdx[key] = (pairIdx[key] || 0) + 1;
+  }
+  const seen = {};
+  for (const e of S.d.edges) {
+    if (!B[e.from] || !B[e.to] || !edgeVisible(e)) continue;
+    const a = L[e.from], b = L[e.to];
+    const key = [e.from, e.to].sort().join("|");
+    const i = (seen[key] = (seen[key] || 0) + 1), n = pairIdx[key];
+    const acx = a.x + a.w / 2, acy = a.y + a.h / 2, bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
+    const p1 = clip(a, bcx, bcy), p2 = clip(b, acx, acy);
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+    const len = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1;
+    const off = (i - (n + 1) / 2) * 26 * (e.from < e.to ? 1 : -1);
+    const cx = mx + (-(p2.y - p1.y) / len) * off, cy = my + ((p2.x - p1.x) / len) * off;
+    const ek = EKINDS.find(x => x.k === e.kind) || EKINDS[0];
+    const hl = S.sel && (e.from === S.sel || e.to === S.sel);
+    const dim = S.sel && !hl && !S.edgeOnlySel;
+    const d = `M${p1.x},${p1.y} Q${cx},${cy} ${p2.x},${p2.y}`;
+    eg += `<g class="edge ${hl ? "hl" : ""} ${dim ? "dim" : ""} ${S.selEdge === e.id ? "sel" : ""}" data-e="${esc(e.id)}">
+      <path d="${d}" style="stroke:var(--e-${e.kind})" ${ek.dash ? `stroke-dasharray="${ek.dash}"` : ""} marker-end="url(#ah-${e.kind})"></path>
+      <path class="hit" d="${d}"></path>
+      ${S.labels && e.label && (!S.sel || hl || S.selEdge === e.id) ? `<text x="${(p1.x + 2 * cx + p2.x) / 4}" y="${(p1.y + 2 * cy + p2.y) / 4 - 3}" text-anchor="middle">${esc(e.label.length > 70 ? e.label.slice(0, 68) + "…" : e.label)}</text>` : ""}
+    </g>`;
+  }
+  $("gedges").innerHTML = eg;
+  applyView();
+}
+function applyView() { $("world").setAttribute("transform", `translate(${S.view.x},${S.view.y}) scale(${S.view.k})`); }
+function defs() {
+  const grid = `<pattern id="gridpat" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" style="fill:none;stroke:var(--grid)" stroke-width="1"></path></pattern>`;
+  const marks = EKINDS.map(x => `<marker id="ah-${x.k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--e-${x.k})"></path></marker>`).join("");
+  $("defs").innerHTML = grid + marks;
+}
+
+/* ---------- inspector ---------- */
+function membersText(n) { return n.members.map(m => (m.vis === " " ? "  " : m.vis + " ") + m.name).join("\n"); }
+function parseMembers(t) {
+  return t.split("\n").map(l => l.replace(/\s+$/, "")).filter(l => l.trim()).map(l => {
+    const m = l.match(/^\s*([+\-#~])\s+(.*)$/);
+    return m ? { vis: m[1] === "-" ? "-" : "+", name: m[2] } : { vis: " ", name: l.trim() };
+  });
+}
+function side() {
+  const el = $("side");
+  if (!S.d) { el.innerHTML = ""; return; }
+  const B = byId();
+  if (S.selEdge) {
+    const e = S.d.edges.find(x => x.id === S.selEdge);
+    if (!e) { S.selEdge = null; return side(); }
+    el.innerHTML = `<h2>Arrow</h2>
+      <p><b>${esc(B[e.from]?.name)}</b> → <b>${esc(B[e.to]?.name)}</b></p>
+      <div class="f"><label for="ekind">Kind</label><select id="ekind">${EKINDS.map(x => `<option ${x.k === e.kind ? "selected" : ""}>${x.k}</option>`).join("")}</select></div>
+      <div class="f"><label for="elabel">Label: the call, or what is read or written</label><input type="text" id="elabel" value="${esc(e.label)}"></div>
+      <div class="row"><button id="eswap" type="button">Reverse</button><button id="edel" type="button" class="${S.armed === "e" ? "armed" : "danger"}">${S.armed === "e" ? "Confirm delete" : "Delete arrow"}</button></div>`;
+    return;
+  }
+  if (S.sel && B[S.sel]) {
+    const n = B[S.sel];
+    const parents = S.d.nodes.filter(x => x.id !== n.id && !isDesc(x.id, n.id, B)).sort((a, b) => a.name.localeCompare(b.name));
+    const outs = S.d.edges.filter(e => e.from === n.id), ins = S.d.edges.filter(e => e.to === n.id);
+    const li = (e, other) => `<li data-goe="${esc(e.id)}"><span class="sw" style="--c:var(--e-${e.kind});--f:transparent"></span><b>${esc(e.kind)}</b> ${esc(B[other]?.name)}${e.label ? " · " + esc(e.label) : ""}</li>`;
+    el.innerHTML = `<h2>Box</h2>
+      <div class="f"><label for="nname">Name</label><input type="text" id="nname" value="${esc(n.name)}"></div>
+      <div class="row">
+        <div class="f"><label for="nkind">Kind</label><select id="nkind">${KINDS.map(k => `<option ${k === n.kind ? "selected" : ""}>${k}</option>`).join("")}</select></div>
+        <div class="f"><label for="norigin">From</label><select id="norigin">${["library", "app"].map(k => `<option ${k === (n.origin || "library") ? "selected" : ""}>${k}</option>`).join("")}</select></div>
+      </div>
+      <div class="f"><label for="nparent">Owned by (drawn inside)</label><select id="nparent"><option value="">nothing</option>${parents.map(p => `<option value="${esc(p.id)}" ${p.id === n.parent ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
+      <div class="f"><label for="nmembers">Members, one per line: "+ public", "- private", or plain text</label><textarea id="nmembers" spellcheck="false">${esc(membersText(n))}</textarea></div>
+      <div class="f"><label for="nnote">Note</label><input type="text" id="nnote" value="${esc(n.note)}"></div>
+      <div class="row">
+        <button id="ncollapse" type="button">${n.collapsed ? "Show members" : "Hide members"}</button>
+        <button id="nconnect" type="button">Connect from here</button>
+        <button id="ndel" type="button" class="${S.armed === "n" ? "armed" : "danger"}">${S.armed === "n" ? "Confirm delete" : "Delete box"}</button>
+      </div>
+      <h2>Arrows out (${outs.length})</h2><ul class="rel">${outs.map(e => li(e, e.to)).join("") || "<li>none</li>"}</ul>
+      <h2>Arrows in (${ins.length})</h2><ul class="rel">${ins.map(e => li(e, e.from)).join("") || "<li>none</li>"}</ul>`;
+    return;
+  }
+  el.innerHTML = `<h2>Diagram</h2>
+    <div class="f"><label for="dname">Name</label><input type="text" id="dname" value="${esc(S.d.name)}"></div>
+    <p>${S.d.nodes.length} boxes · ${S.d.edges.length} arrows</p>
+    <h2>How to</h2>
+    <p>Drag a box to move it. Drop it inside another box to make it owned; drag it out to free it. Select a box to edit its
+      members, its kind and its owner. To draw an arrow, press Connect, click the source, then the target; select an arrow
+      to set its kind and label. "All arrows" switches to showing only the selected box's arrows.</p>
+    <h2>Kinds</h2>
+    <ul class="rel">${KINDS.map(k => `<li><span class="sw" style="--c:var(--k-${k});--f:var(--k-${k}-fill)"></span>${k}</li>`).join("")}</ul>
+    <div class="row"><button id="ddel" type="button" class="${S.armed === "d" ? "armed" : "danger"}" ${S.list.length <= 1 ? "disabled" : ""}>${S.armed === "d" ? "Confirm delete" : "Delete diagram"}</button></div>`;
+}
+function bar() {
+  $("dsel").innerHTML = S.list.map(d => `<option value="${esc(d.id)}" ${d.id === S.did ? "selected" : ""}>${esc(d.name)}</option>`).join("");
+  $("kinds").innerHTML = EKINDS.map(x => `<span class="kt ${x.dash ? "dash" : ""} ${S.hide.has(x.k) ? "off" : ""}" data-k="${x.k}" style="--c:var(--e-${x.k})" role="button" tabindex="0" aria-pressed="${!S.hide.has(x.k)}"><i></i>${x.label}</span>`).join("");
+  $("connect").classList.toggle("on", S.connecting);
+  $("undo").disabled = !S.undo.length; $("redo").disabled = !S.redo.length;
+  $("edgemode").textContent = S.edgeOnlySel ? "Selected box's arrows" : "All arrows";
+  $("showlabels").classList.toggle("on", S.labels);
+  $("cv").classList.toggle("connecting", S.connecting);
+  $("hint").textContent = S.connecting ? (S.connectFrom ? "Now click the target box. Esc cancels." : "Click the source box. Esc cancels.")
+    : "Drag a box to move it; drop it inside another to make it owned; drag a box's corner to resize it. Ctrl/⌘ Z undoes. Drag the background to pan, scroll to zoom.";
+}
+function all() { render(); side(); bar(); }
+
+/* ---------- persistence ---------- */
+function setStatus(t, warn) { $("status").textContent = t; $("status").classList.toggle("warn", !!warn); }
+function snapshot() { return { name: S.d.name, nodes: S.d.nodes, edges: S.d.edges, updated: new Date().toISOString() }; }
+const plain = d => ({ name: d.name, nodes: d.nodes || [], edges: d.edges || [] });
+function stable(v) {
+  if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+  if (v && typeof v === "object") return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + stable(v[k])).join(",") + "}";
+  return JSON.stringify(v);
+}
+function resetHistory() { S.undo = []; S.redo = []; S.base = structuredClone(plain(S.d)); }
+function changed() {
+  if (S.base) { S.undo.push(S.base); if (S.undo.length > 200) S.undo.shift(); }
+  S.redo = []; S.base = structuredClone(plain(S.d));
+  persist();
+}
+function step(from, to) {
+  if (!S.d || !from.length) return;
+  to.push(structuredClone(plain(S.d)));
+  S.d = from.pop(); S.base = structuredClone(plain(S.d));
+  const B = byId();
+  if (S.sel && !B[S.sel]) S.sel = null;
+  if (S.selEdge && !S.d.edges.some(x => x.id === S.selEdge)) S.selEdge = null;
+  S.armed = null; persist(); all();
+}
+function persist() {
+  const i = S.list.findIndex(x => x.id === S.did);
+  if (i >= 0) S.list[i] = { id: S.did, ...S.d }; else S.list.push({ id: S.did, ...S.d });
+  clearTimeout(S.saveTimer);
+  S.saveTimer = setTimeout(save, 500);
+  setStatus("unsaved changes");
+}
+async function save() {
+  if (!S.d) return;
+  if (S.local) { lsSet("object-board:local", JSON.stringify(S.list)); setStatus("saved in this browser only", true); return; }
+  if (S.saving) { S.dirty = true; return; }
+  S.saving = true; setStatus("saving…");
+  try {
+    do { S.dirty = false; await S.db.collection("diagrams").doc(S.did).set(snapshot()); } while (S.dirty);
+    setStatus("saved");
+  } catch (e) {
+    setStatus(e && e.code === "quota_exceeded" ? "storage full" : "not saved: " + ((e && e.code) || "error"), true);
+  } finally { S.saving = false; }
+}
+function pick(id) {
+  const d = S.list.find(x => x.id === id) || S.list[0];
+  if (!d) return;
+  S.did = d.id; S.d = structuredClone({ name: d.name, nodes: d.nodes || [], edges: d.edges || [] });
+  S.sel = S.selEdge = null; S.armed = null; resetHistory();
+  lsSet("object-board:did", S.did);
+  all(); fit();
+}
+function blank(name) { return { id: nid("d-"), name, nodes: [], edges: [] }; }
+async function start() {
+  defs();
+  let db = null;
+  try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (e) { db = null; }
+  if (!db) {
+    S.local = true;
+    let stored = null; try { stored = JSON.parse(lsGet("object-board:local") || "null"); } catch (e) {}
+    S.list = stored && stored.length ? stored : [blank("draft")];
+    setStatus("no shared storage here: changes stay in this browser", true);
+    pick(lsGet("object-board:did")); return;
+  }
+  S.db = db;
+  db.collection("diagrams").onSnapshot(snap => {
+    const docs = snap.docs.filter(d => d.exists).map(d => ({ id: d.id, ...d.data() }));
+    docs.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const busy = S.saving || S.drag || S.saveTimer && $("status").textContent === "unsaved changes";
+    if (!docs.length) {
+      if (!S.d) { S.list = [blank("draft")]; pick(S.list[0].id); setStatus("empty: saved on your first change"); }
+      return;
+    }
+    if (!S.d) { S.list = docs; pick(lsGet("object-board:did")); setStatus("saved"); return; }
+    if (busy || snap.metadata.hasPendingWrites) { bar(); return; }
+    S.list = docs;
+    const cur = docs.find(x => x.id === S.did);
+    if (cur) {
+      const mine = S.base && stable(plain(cur)) === stable(S.base);
+      S.d = structuredClone(plain(cur));
+      if (!mine) resetHistory();
+      all();
+    }
+    else pick(docs[0].id);
+    setStatus("saved");
+  }, err => setStatus("live updates stopped: " + err.code, true));
+}
+
+/* ---------- view ---------- */
+function toWorld(cx, cy) { const r = $("cv").getBoundingClientRect(); return { x: (cx - r.left - S.view.x) / S.view.k, y: (cy - r.top - S.view.y) / S.view.k }; }
+function zoomAt(f, cx, cy) {
+  const r = $("cv").getBoundingClientRect(); const px = cx - r.left, py = cy - r.top;
+  const k = Math.min(3, Math.max(0.15, S.view.k * f));
+  S.view.x = px - (px - S.view.x) * (k / S.view.k); S.view.y = py - (py - S.view.y) * (k / S.view.k); S.view.k = k; applyView();
+}
+function fit() {
+  if (!S.d || !S.d.nodes.length) { S.view = { x: 40, y: 40, k: 1 }; applyView(); return; }
+  const L = layoutBounds(), r = $("cv").getBoundingClientRect();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of Object.values(L)) { x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  const k = Math.min(1.2, Math.max(0.15, Math.min((r.width - 40) / (x1 - x0), (r.height - 40) / (y1 - y0))));
+  S.view = { k, x: (r.width - (x1 - x0) * k) / 2 - x0 * k, y: (r.height - (y1 - y0) * k) / 2 - y0 * k }; applyView();
+}
+
+/* ---------- interaction ---------- */
+const cv = $("cv");
+function nodeAt(wx, wy, exclude) {
+  const B = byId(), L = layoutBounds();
+  let best = null, bd = -1;
+  for (const n of S.d.nodes) {
+    if (exclude && (n.id === exclude || isDesc(n.id, exclude, B))) continue;
+    const b = L[n.id];
+    if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) { const d = depth(n, B); if (d > bd) { bd = d; best = n.id; } }
+  }
+  return best;
+}
+function moveTree(id, dx, dy) { const n = byId()[id]; n.x += dx; n.y += dy; for (const c of children(id)) moveTree(c.id, dx, dy); }
+cv.addEventListener("pointerdown", e => {
+  if (!S.d) return;
+  const ng = e.target.closest(".node"), eg = e.target.closest(".edge");
+  const w = toWorld(e.clientX, e.clientY);
+  if (S.connecting) {
+    if (!ng) return;
+    const id = ng.dataset.n;
+    if (!S.connectFrom) { S.connectFrom = id; S.sel = id; S.selEdge = null; all(); return; }
+    if (id !== S.connectFrom) {
+      const ed = { id: nid("e"), from: S.connectFrom, to: id, kind: "calls", label: "" };
+      S.d.edges.push(ed); S.selEdge = ed.id; S.sel = null; changed();
+    }
+    S.connecting = false; S.connectFrom = null; all(); return;
+  }
+  const rz = e.target.closest(".rz");
+  if (rz) {
+    S.sel = rz.dataset.rz; S.selEdge = null; S.armed = null;
+    S.drag = { resize: rz.dataset.rz, moved: false };
+    cv.setPointerCapture(e.pointerId); side(); bar(); render(); return;
+  }
+  if (eg && !ng) { S.selEdge = eg.dataset.e; S.sel = null; S.armed = null; all(); return; }
+  if (ng) {
+    const id = ng.dataset.n;
+    if (S.sel !== id || S.selEdge) { S.sel = id; S.selEdge = null; S.armed = null; side(); bar(); }
+    S.drag = { id, last: w, moved: false, over: null };
+    cv.setPointerCapture(e.pointerId);
+    render();
+    return;
+  }
+  S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: S.view.x, vy: S.view.y, moved: false };
+  cv.classList.add("panning"); cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", e => {
+  if (!S.drag) return;
+  if (S.drag.pan) {
+    const dx = e.clientX - S.drag.sx, dy = e.clientY - S.drag.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) S.drag.moved = true;
+    S.view.x = S.drag.vx + dx; S.view.y = S.drag.vy + dy; applyView(); return;
+  }
+  const w = toWorld(e.clientX, e.clientY);
+  if (S.drag.resize) {
+    const n = byId()[S.drag.resize], s = ownSize(n);
+    n.w = Math.round(Math.max(s.w, w.x - n.x)); n.h = Math.round(Math.max(s.h, w.y - n.y));
+    S.drag.moved = true; render(); return;
+  }
+  const dx = w.x - S.drag.last.x, dy = w.y - S.drag.last.y;
+  if (!S.drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
+  if (!S.drag.moved) { const n = byId()[S.drag.id]; S.drag.origParent = n.parent; n.parent = null; }
+  S.drag.moved = true; S.drag.last = w;
+  moveTree(S.drag.id, dx, dy);
+  S.drag.over = nodeAt(w.x, w.y, S.drag.id);
+  render();
+});
+function endDrag(e) {
+  if (!S.drag) return;
+  const d = S.drag; S.drag = null; cv.classList.remove("panning");
+  if (d.pan) { if (!d.moved && !S.connecting) { S.sel = null; S.selEdge = null; S.armed = null; all(); } return; }
+  if (d.resize) { if (d.moved) changed(); all(); return; }
+  if (d.moved) {
+    const B = byId(), n = B[d.id];
+    const target = d.over || null;
+    if (target !== n.parent) n.parent = target;
+    changed();
+  }
+  all();
+}
+cv.addEventListener("pointerup", endDrag);
+cv.addEventListener("pointercancel", endDrag);
+cv.addEventListener("wheel", e => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); }, { passive: false });
+cv.addEventListener("dblclick", e => {
+  const ng = e.target.closest(".node"); if (!ng) return;
+  const n = byId()[ng.dataset.n]; n.collapsed = !n.collapsed; changed(); all();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { S.connecting = false; S.connectFrom = null; S.armed = null; all(); return; }
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+  if (!(e.metaKey || e.ctrlKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey) { e.preventDefault(); step(S.undo, S.redo); }
+  else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); step(S.redo, S.undo); }
+});
+$("undo").onclick = () => step(S.undo, S.redo);
+$("redo").onclick = () => step(S.redo, S.undo);
+$("zin").onclick = () => { const r = cv.getBoundingClientRect(); zoomAt(1.25, r.left + r.width / 2, r.top + r.height / 2); };
+$("zout").onclick = () => { const r = cv.getBoundingClientRect(); zoomAt(0.8, r.left + r.width / 2, r.top + r.height / 2); };
+$("zfit").onclick = fit;
+$("connect").onclick = () => { S.connecting = !S.connecting; S.connectFrom = null; bar(); };
+$("edgemode").onclick = () => { S.edgeOnlySel = !S.edgeOnlySel; all(); };
+$("showlabels").onclick = () => { S.labels = !S.labels; all(); };
+$("kinds").addEventListener("click", e => { const t = e.target.closest(".kt"); if (!t) return; const k = t.dataset.k; S.hide.has(k) ? S.hide.delete(k) : S.hide.add(k); all(); });
+$("kinds").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.target.click(); } });
+$("addnode").onclick = () => {
+  if (!S.d) return;
+  const r = cv.getBoundingClientRect(), c = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+  const n = { id: nid("n"), name: "New object", kind: "object", x: Math.round(c.x - 80), y: Math.round(c.y - 30), origin: "library", members: [], note: "", parent: null, collapsed: false };
+  S.d.nodes.push(n); S.sel = n.id; S.selEdge = null; changed(); all();
+  const f = $("nname"); if (f) { f.focus(); f.select(); }
+};
+$("dsel").onchange = e => pick(e.target.value);
+$("dnew").onclick = () => { const d = blank("new diagram"); S.list.push(d); pick(d.id); changed(); };
+$("ddup").onclick = () => { if (!S.d) return; const d = { id: nid("d-"), ...structuredClone(S.d), name: S.d.name + " (copy)" }; S.list.push(d); pick(d.id); changed(); };
+
+$("side").addEventListener("change", e => {
+  const t = e.target, B = byId();
+  if (t.id === "dname") { S.d.name = t.value.trim() || S.d.name; changed(); bar(); return; }
+  const n = S.sel && B[S.sel];
+  if (n) {
+    if (t.id === "nname") n.name = t.value.trim() || n.name;
+    else if (t.id === "nkind") n.kind = t.value;
+    else if (t.id === "norigin") n.origin = t.value;
+    else if (t.id === "nparent") n.parent = t.value || null;
+    else if (t.id === "nmembers") n.members = parseMembers(t.value);
+    else if (t.id === "nnote") n.note = t.value.trim();
+    else return;
+    changed(); render(); if (t.id === "nparent" || t.id === "nname") side(); return;
+  }
+  const ed = S.selEdge && S.d.edges.find(x => x.id === S.selEdge);
+  if (ed) {
+    if (t.id === "ekind") ed.kind = t.value; else if (t.id === "elabel") ed.label = t.value.trim(); else return;
+    changed(); render();
+  }
+});
+$("side").addEventListener("click", async e => {
+  const t = e.target.closest("button, li[data-goe]"); if (!t) return;
+  if (t.dataset.goe) { S.selEdge = t.dataset.goe; S.sel = null; all(); return; }
+  const B = byId();
+  if (t.id === "ncollapse") { const n = B[S.sel]; n.collapsed = !n.collapsed; changed(); all(); }
+  else if (t.id === "nconnect") { S.connecting = true; S.connectFrom = S.sel; bar(); }
+  else if (t.id === "ndel") {
+    if (S.armed !== "n") { S.armed = "n"; side(); return; }
+    const id = S.sel; S.armed = null;
+    for (const c of children(id)) c.parent = B[id].parent || null;
+    S.d.nodes = S.d.nodes.filter(x => x.id !== id); S.d.edges = S.d.edges.filter(x => x.from !== id && x.to !== id);
+    S.sel = null; changed(); all();
+  }
+  else if (t.id === "eswap") { const ed = S.d.edges.find(x => x.id === S.selEdge); [ed.from, ed.to] = [ed.to, ed.from]; changed(); all(); }
+  else if (t.id === "edel") {
+    if (S.armed !== "e") { S.armed = "e"; side(); return; }
+    S.armed = null; S.d.edges = S.d.edges.filter(x => x.id !== S.selEdge); S.selEdge = null; changed(); all();
+  }
+  else if (t.id === "ddel") {
+    if (S.list.length <= 1) return;
+    if (S.armed !== "d") { S.armed = "d"; side(); return; }
+    S.armed = null; const id = S.did;
+    S.list = S.list.filter(x => x.id !== id);
+    if (S.local) lsSet("object-board:local", JSON.stringify(S.list));
+    else { try { await S.db.collection("diagrams").doc(id).delete(); } catch (err) { setStatus("not deleted: " + ((err && err.code) || "error"), true); } }
+    pick(S.list[0].id);
+  }
+});
+window.addEventListener("resize", () => applyView());
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (S.d) render(); });
+start();
+</script>

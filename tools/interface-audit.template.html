@@ -1,0 +1,328 @@
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&display=swap">
+<style>
+  /* layout: one reading column; findings, then the callers as cards, then the full member table with filters */
+  :root {
+    --bg: #f3f2ef; --panel: #ffffff; --sunk: #ebe9e4; --ink: #1d1c1a; --ink-2: #55524c; --ink-3: #8b877f;
+    --rule: #dcd8d0; --accent: #2a5d84; --accent-fill: #e2ecf4; --bad: #a83a2c; --bad-fill: #f7e4df;
+    --warn: #8a6100; --warn-fill: #f6edd5; --ok: #2f6f4a; --ok-fill: #e1efe6;
+    --sans: "Source Sans 3", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151514; --panel: #1e1e1c; --sunk: #191917; --ink: #ebe8e2; --ink-2: #b3aea5; --ink-3: #7d7971;
+      --rule: #34322e; --accent: #82b4dc; --accent-fill: #1c2a36; --bad: #ec8b7d; --bad-fill: #3a1f1a;
+      --warn: #e2b357; --warn-fill: #33291a; --ok: #7cc79b; --ok-fill: #1a2e22; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151514; --panel: #1e1e1c; --sunk: #191917; --ink: #ebe8e2; --ink-2: #b3aea5; --ink-3: #7d7971;
+    --rule: #34322e; --accent: #82b4dc; --accent-fill: #1c2a36; --bad: #ec8b7d; --bad-fill: #3a1f1a;
+    --warn: #e2b357; --warn-fill: #33291a; --ok: #7cc79b; --ok-fill: #1a2e22; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5;
+         margin: 0; padding-block: 1.6rem 4rem; padding-inline: 16px; }
+  main { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+  header { display: flex; flex-direction: column; gap: .35rem; }
+  h1 { font-size: clamp(1.5rem, 3.6vw, 2rem); margin: 0; letter-spacing: -.015em; }
+  h2 { font-size: 1.1rem; margin: 0; text-wrap: balance; }
+  .stamp { font-family: var(--mono); font-size: .74rem; color: var(--ink-3); }
+  p { margin: 0; color: var(--ink-2); max-width: 75ch; }
+  code, .m { font-family: var(--mono); font-size: .84em; }
+  section { display: flex; flex-direction: column; gap: .8rem; }
+  .pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .pill { font-family: var(--mono); font-size: .76rem; padding: .15rem .55rem; border-radius: 99px; border: 1px solid var(--rule); color: var(--ink-2); background: var(--panel); font-variant-numeric: tabular-nums; }
+  .pill.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-fill); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-fill); }
+  ol.facts { margin: 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: .45rem; max-width: 92ch; color: var(--ink-2); }
+  ol.facts strong { color: var(--ink); }
+
+  .routes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .7rem; }
+  .route { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: .7rem .8rem; display: flex; flex-direction: column; gap: .3rem; }
+  .route .rt { font-weight: 600; display: flex; gap: .5rem; align-items: baseline; }
+  .route .n { font-family: var(--mono); font-size: .78rem; color: var(--ink-3); }
+  .route p { font-size: .9rem; }
+
+  .group { display: flex; flex-direction: column; gap: .55rem; }
+  .group h3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); margin: .4rem 0 0; font-weight: 600; }
+  .callers { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: .6rem; }
+  .caller { background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--route); border-radius: 5px; padding: .65rem .8rem; display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+  .caller .where { font-family: var(--mono); font-size: .8rem; font-weight: 600; overflow-wrap: anywhere; }
+  .caller .where span { color: var(--ink-3); font-weight: 400; }
+  .caller p { font-size: .88rem; }
+  .caller .finding { color: var(--bad); font-size: .86rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: .25rem; }
+  .chip { font-family: var(--mono); font-size: .72rem; padding: .05rem .4rem; border-radius: 3px; border: 1px solid var(--rule); background: var(--sunk); color: var(--ink); overflow-wrap: anywhere; }
+  .chip.priv { border-color: var(--bad); background: var(--bad-fill); color: var(--bad); }
+  .chip.route { background: transparent; border-color: var(--route); color: var(--route); }
+  .r-process { --route: #7a6bb0; } .r-object { --route: var(--accent); } .r-standin { --route: var(--warn); } .r-const { --route: var(--ink-3); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: .55rem .75rem; }
+  .controls input[type=text] { font: inherit; font-size: .9rem; background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: .3rem .5rem; min-width: 0; flex: 1 1 200px; }
+  .controls label { display: inline-flex; gap: .35rem; align-items: center; font-size: .88rem; color: var(--ink-2); cursor: pointer; }
+  .controls .count { font-family: var(--mono); font-size: .75rem; color: var(--ink-3); margin-left: auto; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 860px; font-size: .86rem; }
+  th, td { text-align: left; padding: .38rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); font-weight: 600; background: var(--sunk); position: sticky; top: 0; }
+  tr.sec td { background: var(--sunk); font-weight: 600; font-size: .8rem; color: var(--ink-2); letter-spacing: .02em; }
+  tr.mem { cursor: pointer; }
+  tr.mem:hover td { background: var(--accent-fill); }
+  td.nm { font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+  td.sig { font-family: var(--mono); font-size: .76rem; color: var(--ink-2); max-width: 22rem; overflow-wrap: anywhere; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td.num.zero { color: var(--ink-3); }
+  td.kind { font-size: .78rem; color: var(--ink-3); white-space: nowrap; }
+  .flag { font-family: var(--mono); font-size: .68rem; padding: .02rem .35rem; border-radius: 3px; border: 1px solid; white-space: nowrap; display: inline-block; margin: 0 .2rem .15rem 0; }
+  .flag.out { color: var(--accent); border-color: var(--accent); background: var(--accent-fill); }
+  .flag.priv { color: var(--bad); border-color: var(--bad); background: var(--bad-fill); }
+  .flag.idle { color: var(--warn); border-color: var(--warn); background: var(--warn-fill); }
+  .flag.test { color: var(--ink-3); border-color: var(--rule); }
+  tr.det td { background: var(--bg); }
+  .det { display: flex; flex-direction: column; gap: .4rem; padding: .2rem 0 .4rem; }
+  .det .doc { font-size: .86rem; color: var(--ink-2); max-width: 90ch; }
+  ul.sites { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; font-family: var(--mono); font-size: .74rem; }
+  ul.sites li { overflow-wrap: anywhere; color: var(--ink-2); }
+  ul.sites li b { color: var(--ink); font-weight: 500; }
+  ul.sites li.t { color: var(--ink-3); }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .82rem; color: var(--ink-2); align-items: center; }
+  pre.pseudo { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: .9rem 1rem; margin: 0;
+               overflow-x: auto; font: .78rem/1.55 var(--mono); color: var(--ink); tab-size: 4; }
+  pre.pseudo .kw { color: var(--accent); font-weight: 600; }
+  pre.pseudo .cm { color: var(--ink-3); }
+  pre.pseudo .hd { color: var(--ink-2); font-weight: 600; }
+  pre.pseudo .who { color: var(--ok); }
+  pre.pseudo .leak { color: var(--bad); font-weight: 600; }
+  pre.pseudo .idle { color: var(--warn); }
+  pre.pseudo .tst { color: var(--ink-3); }
+  footer { font-family: var(--mono); font-size: .74rem; color: var(--ink-3); }
+</style>
+
+<main>
+  <header>
+    <div class="stamp" id="stamp"></div>
+    <h1>__TITLE__</h1>
+    <p id="intro"></p>
+  </header>
+
+  <section>
+    <h2 id="asused"></h2>
+    <p>The class as pseudo code: its public members, then the non-public ones, in the order of the section comments in
+      the class file. Each line names who reaches it from outside the class: <span class="m" style="color:var(--ok)">← caller</span>
+      for production code, <span class="m" style="color:var(--bad)">← caller (private)</span> for a private member reached from
+      outside, <span class="m" style="color:var(--warn)"># unused outside</span> for a public member nothing outside uses, and
+      a test count.</p>
+    <pre class="pseudo" id="pseudo"></pre>
+  </section>
+
+  <section>
+    <div class="pills" id="pills"></div>
+    <ol class="facts" id="facts"></ol>
+  </section>
+
+  <section>
+    <h2>Ways in</h2>
+    <div class="routes" id="routes"></div>
+  </section>
+
+  <section>
+    <h2>Callers, and why each calls</h2>
+    <div class="legend"><span><span class="chip priv">_env</span> a private member reached from outside</span></div>
+    <div id="callers"></div>
+  </section>
+
+  <section>
+    <h2>The whole interface</h2>
+    <p>All members, grouped by the section comments in the class file. "inside" counts <code>self.x</code> reads
+      within the class; "outside" counts production code; "tests" counts the test suites. Click a row for its docstring
+      and every outside site.</p>
+    <div class="controls">
+      <input type="text" id="q" placeholder="filter by name" aria-label="Filter members">
+      <label><input type="checkbox" id="onlyOut"> only members used outside</label>
+      <label><input type="checkbox" id="onlyIdle"> only public members unused outside</label>
+      <label><input type="checkbox" id="showTests" checked> count tests</label>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="legend">
+      <span><span class="flag out">outside</span> used by production code outside the class file</span>
+      <span><span class="flag priv">private leak</span> a _member reached from outside</span>
+      <span><span class="flag idle">public, unused outside</span> could be private</span>
+      <span><span class="flag test">tests only</span> reached only by tests</span>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>member</th><th>kind</th><th>signature / value</th><th>inside</th><th>outside</th><th>tests</th><th>flags</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+
+<script>
+const D = __DATA__;
+document.getElementById("stamp").textContent = (D.stamp ? D.stamp + " · " : "") + `${D.file} · class ${D.cls}, lines ${D.span[0]}–${D.span[1]} of ${D.file_lines}`;
+document.getElementById("intro").innerHTML = D.intro || `Every member of <code>${D.cls}</code>, and every place outside its file that reaches it. Built from the source with Python's <code>ast</code>; each caller's reason was read from its code.`;
+document.getElementById("asused").textContent = `${D.cls}, as it is used`;
+document.getElementById("footer").innerHTML = D.footer || `Static analysis: a use is an attribute read on a name bound to ${D.cls}(…) or a declared factory, a parameter named after the class, <code>self.&lt;name&gt;</code>, or the class itself. An instance reached through another name is missed.`;
+document.getElementById("routes").innerHTML = (D.routes || []).map(r => `<div class="route r-${r.css || "object"}"><div class="rt"><span class="chip route">${r.route}</span> ${r.title || ""}</div><p>${r.text || ""}</p></div>`).join("");
+const M = D.members, U = D.uses, C = D.callers;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isTest = u => u.scope === "tests" || u.file.includes("/tests/");
+const isPriv = n => n.startsWith("_") && !n.startsWith("__");
+const byName = Object.fromEntries(M.map(m => [m.name, m]));
+const prodUses = n => U.filter(u => u.member === n && !isTest(u));
+const testUses = n => U.filter(u => u.member === n && isTest(u));
+
+const usedProd = new Set(U.filter(u => !isTest(u) && byName[u.member]).map(u => u.member));
+const usedTest = new Set(U.filter(u => isTest(u) && byName[u.member]).map(u => u.member));
+const pub = M.filter(m => !isPriv(m.name) && !m.name.startsWith("__"));
+const idle = pub.filter(m => !usedProd.has(m.name) && !usedTest.has(m.name));
+const kinds = {}; for (const m of M) kinds[m.kind] = (kinds[m.kind] || 0) + 1;
+const privTest = [...usedTest].filter(isPriv);
+
+document.getElementById("pills").innerHTML = [
+  `<span class="pill">${M.length} members</span>`,
+  `<span class="pill">${kinds.method || 0} methods · ${kinds.property || 0} properties · ${kinds.staticmethod || 0} static · ${kinds.constant || 0} constants · ${kinds.attribute || 0} attributes</span>`,
+  `<span class="pill">${usedProd.size} reached by production code outside</span>`,
+  `<span class="pill bad">${[...usedProd].filter(isPriv).length} private reached by production code</span>`,
+  `<span class="pill warn">${idle.length} of ${pub.length} public unused outside: ${["method", "property", "constant", "attribute"].map(k => `${idle.filter(m => m.kind === k || (k === "method" && m.kind === "staticmethod")).length} ${k === "property" ? "properties" : k + "s"}`).join(" · ")}</span>`,
+  `<span class="pill">${C.length} callers</span>`,
+].join("");
+
+const facts = D.facts || [];
+document.getElementById("facts").innerHTML = facts.map(f => `<li>${f}</li>`).join("");
+
+/* callers */
+const routeClass = r => r.startsWith("process") ? "r-process" : r.startsWith("stand-in") ? "r-standin" : r.startsWith("class") ? "r-const" : "r-object";
+const groups = [...new Set(C.map(c => c.group))];
+document.getElementById("callers").innerHTML = groups.map(g => `<div class="group"><h3>${esc(g)}</h3><div class="callers">${
+  C.filter(c => c.group === g).map(c => `<article class="caller ${routeClass(c.route)}">
+    <div class="chips"><span class="chip route">${esc(c.route)}</span></div>
+    <div class="where">${esc(c.fn)} <span>· ${esc(c.file)}</span></div>
+    <div class="chips">${c.uses.map(x => `<span class="chip ${/(^|\W)_[a-z]/.test(x) && !(D.notPrivate || []).some(p => x.startsWith(p)) ? "priv" : ""}">${esc(x)}</span>`).join("")}</div>
+    <p>${esc(c.why)}</p>
+    ${c.finding ? `<p class="finding">${esc(c.finding)}</p>` : ""}
+  </article>`).join("")}</div></div>`).join("");
+
+/* member table */
+const SECTIONS = D.sections;
+const open = new Set();
+function sig(m) {
+  if (m.kind === "constant") return "= " + (m.value || "");
+  if (m.kind === "attribute") return "self." + m.name + (m.set_at ? `  (set at ${m.set_at.length} line${m.set_at.length > 1 ? "s" : ""})` : "");
+  if (m.kind === "property") return "";
+  return "(" + (m.sig || "") + ")";
+}
+function render() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const onlyOut = document.getElementById("onlyOut").checked;
+  const onlyIdle = document.getElementById("onlyIdle").checked;
+  const showTests = document.getElementById("showTests").checked;
+  let rows = "", shown = 0;
+  for (const s of SECTIONS) {
+    const list = M.filter(m => m.section === s).sort((a, b) => (a.line || 0) - (b.line || 0)).filter(m => {
+      if (q && !m.name.toLowerCase().includes(q)) return false;
+      if (onlyOut && !usedProd.has(m.name)) return false;
+      if (onlyIdle && !idle.includes(m)) return false;
+      return true;
+    });
+    if (!list.length) continue;
+    rows += `<tr class="sec"><td colspan="7">${esc(s)} · ${list.length}</td></tr>`;
+    for (const m of list) {
+      shown++;
+      const p = prodUses(m.name), t = showTests ? testUses(m.name) : [];
+      const flags = [];
+      if (p.length) flags.push(`<span class="flag out">outside</span>`);
+      if (isPriv(m.name) && (p.length || t.length)) flags.push(`<span class="flag priv">private leak</span>`);
+      if (idle.includes(m)) flags.push(`<span class="flag idle">public, unused outside</span>`);
+      if (!p.length && testUses(m.name).length) flags.push(`<span class="flag test">tests only</span>`);
+      rows += `<tr class="mem" data-n="${esc(m.name)}" tabindex="0" aria-expanded="${open.has(m.name)}">
+        <td class="nm">${esc(m.name)}</td><td class="kind">${esc(m.kind)}</td><td class="sig">${esc(sig(m))}</td>
+        <td class="num ${m.internal ? "" : "zero"}">${m.internal}</td><td class="num ${p.length ? "" : "zero"}">${p.length}</td>
+        <td class="num ${t.length ? "" : "zero"}">${showTests ? t.length : "–"}</td><td>${flags.join("")}</td></tr>`;
+      if (open.has(m.name)) {
+        const sites = [...p, ...t].map(u => `<li class="${isTest(u) ? "t" : ""}"><b>${esc(u.file)}:${u.line}</b> ${esc(u.caller)} · ${esc(u.via)} · ${esc(u.code)}</li>`).join("");
+        rows += `<tr class="det"><td colspan="7"><div class="det">
+          ${m.doc ? `<div class="doc">${esc(m.doc)}</div>` : ""}
+          <div class="m" style="font-size:.74rem;color:var(--ink-3)">${esc(D.file)}:${m.line || "?"}${m.end ? "–" + m.end : ""}</div>
+          <ul class="sites">${sites || "<li>no use outside the class</li>"}</ul></div></td></tr>`;
+      }
+    }
+  }
+  document.getElementById("tbody").innerHTML = rows;
+  document.getElementById("count").textContent = `${shown} of ${M.length}`;
+}
+document.getElementById("tbody").addEventListener("click", e => {
+  const tr = e.target.closest("tr.mem"); if (!tr) return;
+  const n = tr.dataset.n; open.has(n) ? open.delete(n) : open.add(n); render();
+});
+document.getElementById("tbody").addEventListener("keydown", e => {
+  const tr = e.target.closest("tr.mem"); if (!tr || (e.key !== "Enter" && e.key !== " ")) return;
+  e.preventDefault(); const n = tr.dataset.n; open.has(n) ? open.delete(n) : open.add(n); render();
+  const again = document.querySelector(`tr.mem[data-n="${CSS.escape(n)}"]`); if (again) again.focus();
+});
+for (const id of ["q", "onlyOut", "onlyIdle", "showTests"]) document.getElementById(id).addEventListener(id === "q" ? "input" : "change", render);
+render();
+
+/* pseudo-code class */
+(function () {
+  // file paths shortened by the directory prefix every use shares
+  const prefix = (() => {
+    const parts = D.uses.map(u => u.file.split("/").slice(0, -1));
+    if (!parts.length) return "";
+    let n = 0;
+    while (parts.every(p => p.length > n && p[n] === parts[0][n])) n++;
+    return n ? parts[0].slice(0, n).join("/") + "/" : "";
+  })();
+  const short = u => {
+    let f = u.file.slice(prefix.length).replace(/\.py$/, "").replace(/\/__init__$/, "");
+    const fn = u.caller === "<module>" ? "" : "." + u.caller.replace(/^[A-Z]\w*\./, "");
+    return f + fn;
+  };
+  const SECTIONS = D.sections;
+  const decl = m => {
+    if (m.kind === "constant") return `${m.name} = ${m.value || ""}${(m.raw || "").length >= 80 ? "…" : ""}`;
+    if (m.kind === "attribute") return `${m.name}: attribute`;
+    if (m.kind === "property") return `<span class="kw">@property</span> ${m.name}`;
+    const pre = m.kind === "staticmethod" ? `<span class="kw">@staticmethod</span> ` : "";
+    return `${pre}<span class="kw">def</span> ${m.name}(${m.sig || ""})`;
+  };
+  const plainLen = s => s.replace(/<[^>]+>/g, "").replace(/&#?\w+;/g, "x").length;
+  const COL = 58;
+  const line = m => {
+    const p = prodUses(m.name), t = testUses(m.name);
+    const who = [...new Set(p.map(short))];
+    let note = "";
+    if (who.length) note = `<span class="${isPriv(m.name) ? "leak" : "who"}">← ${esc(who.join(", "))}${isPriv(m.name) ? " (private)" : ""}</span>`;
+    else if (!isPriv(m.name) && !t.length) note = `<span class="idle"># unused outside</span>`;
+    if (t.length) note += `${note ? "  " : ""}<span class="tst">tests ×${t.length}</span>`;
+    const d = decl({ ...m, raw: m.value, value: m.value ? esc(m.value) : m.value, sig: m.sig ? esc(m.sig) : m.sig });
+    const pad = Math.max(2, COL - 4 - plainLen(d));
+    return "    " + d + (note ? " ".repeat(pad) + note : "");
+  };
+  const out = [];
+  out.push(`<span class="kw">class</span> ${esc(D.cls)}:`);
+  if (D.classdoc) out.push(`    <span class="cm">"""${esc(D.classdoc)}"""</span>`);
+  out.push("");
+  out.push(`    <span class="kw">def</span> __init__(${esc(D.init_sig)})` + " ".repeat(Math.max(2, COL - 4 - plainLen(`def __init__(${D.init_sig})`))) +
+           `<span class="who">← ${esc((D.ctor_callers || []).join(", "))}</span>`);
+  for (const [title, pick] of [["public", m => !isPriv(m.name) && !m.name.startsWith("__")], ["non-public", m => isPriv(m.name)]]) {
+    const ms = M.filter(pick);
+    out.push("");
+    out.push(`    <span class="hd"># ══ ${title} · ${ms.length} ${"═".repeat(Math.max(4, 44 - title.length))}</span>`);
+    for (const s of SECTIONS) {
+      const list = ms.filter(m => m.section === s).sort((a, b) => (a.line || 0) - (b.line || 0));
+      if (!list.length) continue;
+      out.push("");
+      out.push(`    <span class="cm"># --- ${esc(s)}</span>`);
+      for (const m of list) out.push(line(m));
+    }
+  }
+  document.getElementById("pseudo").innerHTML = out.join("\n");
+})();
+</script>

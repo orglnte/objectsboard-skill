@@ -13,6 +13,9 @@ with a concept-design skill such as
 [concept-skills](https://github.com/ontology-of-everything/concept-skills),
 then use objectsboard to make the objects match it.
 
+Python only for now: the extractor parses Python source. The method and the
+board apply to any language.
+
 ## Install
 
 ```sh
@@ -28,10 +31,15 @@ Then `/objectsboard` in Claude Code.
 2. `METHOD.md`: the method, the tools, keeping the diagrams true, the views,
    the pitfalls.
 3. `tools/extract_interface.py`: a class's whole interface and every outside
-   use, as JSON (Python codebases).
+   use, as JSON, following factories, parameters, stand-ins and attributes or
+   properties that hold an instance (Python only).
 4. `tools/file_contracts.py`: every mention of given file names, to find
    what goes around an object through its files.
 5. `tools/build_audit.py` + `tools/interface-audit.template.html`: the audit
    page (the class as pseudo code, each caller and why it calls).
-6. `tools/objects-board.html`: the board, published as a claude.ai artifact
+6. `tools/board.py`: checks every arrow's proof against the code, lays a
+   diagram out keeping the board's existing positions, and makes the
+   simplified view.
+7. `tools/objects-board.html`: the board, published as a claude.ai artifact
    with a shared database (`capabilities: {db: {}}`).
+8. `tests/`: `python3 -m pytest tests -q`.

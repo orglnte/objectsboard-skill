@@ -4,14 +4,18 @@
     extract_interface.py --class path/to/mod.py:ClassName \
         --scan lib=path/to/lib --scan tests=path/to/tests [--scan app=...] \
         [--factory make_thing] [--stand-in _ShimThing] [--param-name thing] \
-        --out data.json
+        [--attr thing] --out data.json
+
+Python only: it parses Python source with the standard `ast` module.
 
 A use is an attribute read (or getattr/hasattr/setattr with a constant name)
 on: a name bound to ClassName(...) / ClassName.__new__ / a --factory call
 (also through an `a if c else b`), a --stand-in instance, a parameter named
---param-name (default: the class name lower-cased), `self.<param-name>`, or
-the class itself. Anything reached through another name is missed: follow a
-function that returns an instance with --factory.
+--param-name (default: the class name lower-cased), `self.<param-name>`, an
+attribute or property named --attr (`<anything>.thing`, and a name assigned
+from one), or the class itself. Anything reached through another name is
+missed: follow a function that returns an instance with --factory, and an
+attribute or property that holds one with --attr.
 
 Members come from the class body (methods, properties, static/class methods,
 UPPER constants) plus every `self.x = ...` in it. Sections are the class's own
@@ -26,6 +30,7 @@ ap.add_argument("--scan", action="append", default=[])
 ap.add_argument("--factory", action="append", default=[])
 ap.add_argument("--stand-in", dest="standin", action="append", default=[])
 ap.add_argument("--param-name")
+ap.add_argument("--attr", action="append", default=[])
 ap.add_argument("--out", required=True)
 a = ap.parse_args()
 
@@ -98,6 +103,13 @@ def ctor(call):
     if any(fx in ast.unparse(call.func) for fx in a.factory): return cname
     return None
 
+def instance(v):
+    """cname when the expression yields an instance: a constructor or factory
+    call, or an attribute/property named by --attr."""
+    if isinstance(v, ast.Attribute) and v.attr in a.attr:
+        return "." + v.attr
+    return ctor(v)
+
 uses = []
 for spec in a.scan:
     tag, base = spec.split("=", 1)
@@ -117,6 +129,7 @@ for spec in a.scan:
                 if v.id in (cname, "_" + cname): return "class"
             if isinstance(v, ast.Attribute):
                 if v.attr == pname and isinstance(v.value, ast.Name) and v.value.id == "self": return "self." + pname
+                if v.attr in a.attr: return "." + v.attr
                 if v.attr == cname: return "class"
             return None
         def check(n, qual, bound):
@@ -139,7 +152,7 @@ for spec in a.scan:
                             if arg.arg == pname: nb[pname] = "param"
                         for s in ast.walk(ch):
                             if isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
-                                k = ctor(s.value)
+                                k = instance(s.value)
                                 if k: nb[s.targets[0].id] = k
                             if isinstance(s, ast.withitem) and isinstance(s.optional_vars, ast.Name):
                                 k = ctor(s.context_expr)

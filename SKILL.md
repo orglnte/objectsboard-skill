@@ -10,6 +10,10 @@ them. This skill checks, one object at a time, that each concept's state and
 files are owned by the objects meant to own them, shows the gap on a board,
 and lets the user draw the target encapsulation.
 
+**Python only for now:** the extractor parses Python source. The method and
+the board work for any language, but the interface and its uses would have
+to be gathered by hand.
+
 It covers:
 
 1. **Concepts:** what each unit of function is for, its aliases and the
@@ -37,14 +41,18 @@ Without a map, start from the object the user's question is about.
 1. Pick ONE object: the one the question is about, or the largest class on
    its path. Never a package from an import graph alone.
 2. `tools/extract_interface.py`: its whole interface and every outside use
-   (add each factory, stand-in and parameter name the object travels under).
+   (add each factory, stand-in, parameter name and attribute or property the
+   object travels under: `--factory`, `--stand-in`, `--param-name`,
+   `--attr`).
 3. Read every caller; write one sentence per call site on why it calls.
 4. `tools/file_contracts.py`: everything that reads or writes the object's
    files without going through it.
 5. Report the findings as checkable facts with file and line; stop and let
    the user decide.
 6. Publish `tools/objects-board.html` as an artifact with `capabilities: {db:
-   {}}`, seed the current state (every arrow proved against the code), and
+   {}}`. Write the diagram as a spec where every arrow carries its proof (a
+   file and a pattern), run `tools/board.py build` (it refuses an unproved
+   arrow and keeps the user's positions), seed the result, and
    let the user duplicate and drag it into the target encapsulation. Read
    their diagram back before proposing code.
 7. Refactor toward the target one owner at a time, suites green per commit,

@@ -81,16 +81,22 @@ decided.
 
 1. **`extract_interface.py`**: the interface and the outside uses as JSON
    (`cls, file, span, classdoc, init_sig, sections, members, uses`).
-   Static analysis: an instance reached through a name it does not track is
-   missed, so say so on the page.
+   Static analysis of Python source: an instance reached through a name it
+   does not track is missed (follow factories with `--factory` and
+   attributes or properties with `--attr`), so say so on the page.
 2. **`file_contracts.py`**: every quoted mention of the given file names,
    with two lines of context.
-3. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
+3. **`board.py`**: `check` refuses any arrow whose proof (a file and a
+   regex) does not match; `build` lays the diagram out, keeping the
+   positions of every box the board already has and placing new ones next
+   to their main neighbour without overlap, and stamps the revision;
+   `simplify` makes the simplified view.
+4. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
    Sections: the pseudo-code class; summary counts; findings; ways in; one
    card per caller (route, members used, why, finding); the full member
    table with filters (only used outside, only public unused outside, count
    tests). Clicking a member shows its docstring and every outside site.
-4. **`objects-board.html`**: a diagram editor, published as an artifact with
+5. **`objects-board.html`**: a diagram editor, published as an artifact with
    `capabilities: {db: {}}`.
    1. **Boxes** have a name, a kind (object, module, process, file, folder,
       external), an origin (library, or app: code built on
@@ -127,8 +133,8 @@ decided.
    ignores a remote snapshot that arrives while the operator is dragging,
    saving or has unsaved changes.
 2. **Prove every arrow against the code before writing it.** Each arrow
-   carries its evidence, a file and a pattern that must match at HEAD; the
-   script that builds the edges fails on a missing match. Stamp the
+   carries its evidence, a file and a pattern that must match at HEAD;
+   `board.py check` fails on a missing match. Stamp the
    diagram's name with the commit it was checked at, and check again after
    every change that moves a call.
 3. **Run the extractor with every way the object is reached:** each

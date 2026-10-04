@@ -142,7 +142,8 @@ decided.
    table with filters (only used outside, only public unused outside, count
    tests). Clicking a member shows its docstring and every outside site.
 7. **`objects-board.html`**: a diagram editor, published as an artifact with
-   `capabilities: {db: {}}`.
+   `capabilities: {db: {}}`. One board per repo, named `<repo> Objects
+   Board` in its `<title>` and heading; the repo's diagrams live in it.
    1. **Boxes** have a name, a kind (object, module, process, file, folder,
       external), an origin (library, or app: code built on
       it), members (`+` public,

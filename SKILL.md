@@ -119,7 +119,9 @@ Without a map, start from the object the user's question is about.
 6. Report the findings as checkable facts with file and line; stop and let
    the user decide.
 7. Publish `tools/objects-board.html` as an artifact with `capabilities: {db:
-   {}}`. Write the diagram as a spec where every arrow carries its proof (a
+   {}}`. A board is per repo: one artifact per repo, its `<title>` and
+   heading `<repo> Objects Board` (e.g. `shop Objects Board`), every diagram
+   of that repo inside it; another repo gets its own board. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions), seed the result, and
    let the user duplicate and drag it into the target encapsulation. No

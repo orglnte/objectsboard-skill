@@ -1,6 +1,6 @@
 ---
 name: objectsboard
-description: Concepts, separation of concerns, encapsulation and abstraction — translate a codebase's concepts into its actual objects and review its architecture for patterns, antipatterns and dark concepts. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact) and let the user drag it into the target encapsulation before any code changes. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
+description: Concepts, separation of concerns, encapsulation and abstraction — translate a codebase's concepts into its actual objects and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact) and let the user drag it into the target encapsulation before any code changes. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
 ---
 
 # Objectsboard
@@ -39,32 +39,38 @@ It covers:
 
 ## The whole codebase: the objects representation (Python)
 
-When the user wants to see everything, draw the objects representation from
-`tools/trace_objects.py --concepts <concept map> --spec ...` (the test suite's
-run plus the source):
+When the user wants to see everything, draw the objects representation:
+`tools/trace_objects.py --concepts <concept map> --spec ...`. Boxes are the
+classes that encapsulate a concept (the map's Objects column), one arrow
+per pair of boxes that call each other, and modules no class encapsulates
+as external boxes.
 
-1. **Boxes are the classes that encapsulate a concept:** the classes the
-   concept map's Objects column names.
-2. **One arrow per pair of boxes that call each other**, labelled with the
-   members called.
-3. **A module not encapsulated by a class is an external box.**
-4. **What folds where:**
-   1. a subclass of a concept class folds into its base's box (listed as a
-      member);
-   2. a helper class folds into the concept class of its file;
-   3. a module's functions fold into the concept class of their file when
-      that class is their only caller at run time;
-   4. a value class (a dataclass, NamedTuple, Enum, or a class with no public
-      method) goes inside the one box whose code constructs it;
-   5. another module goes inside a concept class only when that class is its
-      only caller both statically (only its file imports the module) and at
-      run time.
-5. **Never:** one box around everything, folder boxes, or the module import
+**Placement comes from structure and the concept map, never from usage**
+(the first rule that matches wins):
+
+1. The concept map declares it: a module the map's rows consistently list
+   with one concept class belongs to it; one marked `(external)` is
+   external.
+2. The file holds a concept class: its functions and helper classes belong
+   to it (the class named after the file, or after the package for an
+   `__init__.py`); another concept class in the file nests inside it.
+3. The package names its class: any other module belongs to the concept
+   class named after its folder (`cell/` -> Cell), or the nearest enclosing
+   folder's, never the root's.
+4. A concept class created and kept by exactly one other nests in it; a
+   subclass folds into its base.
+5. Everything else is external.
+
+**Usage only shows what is wrong, in the warning colour:**
+
+1. **Bypass arrows:** an arrow from outside an owner straight into one of its
+   parts (a module or a nested class) goes around the owner's interface.
+   These are the refactoring worklist: route each through the owner, one per
+   commit, suites green, then redraw.
+2. **Flagged boxes:** a part called directly from outside its owner, and a
+   misplaced module (in an owner's folder, but owned by no class).
+3. Never draw one box around everything, folder boxes, or the module import
    graph as the whole-codebase board.
-6. **Moves:** an external module whose only concept-class user is one class
-   does not belong outside it. `trace_objects.py` lists these moves; carry
-   each out as a refactor (its other users then reach it through the class),
-   one move per commit with the suites green, and redraw the board.
 
 ## Input
 

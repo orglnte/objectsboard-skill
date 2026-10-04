@@ -228,32 +228,29 @@ class Square(Shape):
 def _square(x):
     return x * x
 ''',
-    "lib/util.py": '''
-def fmt(x):
-    return str(x)
-''',
-    "lib/other.py": '''
-from lib import util
-
-
-def line():
-    return util.fmt(2)
-''',
-    "lib/use.py": '''
-from lib.shapes import Square
-from lib import util
+    "lib/report/__init__.py": "",
+    "lib/report/report.py": '''
+from lib.report import fmt
 
 
 class Report:
-    def show(self):
-        return util.fmt(Square().area().value)
+    def show(self, shape):
+        return fmt.fmt(shape.area().value)
+''',
+    "lib/report/fmt.py": '''
+def fmt(x):
+    return str(x)
+''',
+    "lib/util.py": '''
+from lib.report import fmt
 
 
-def top():
-    return util.fmt(1)
+def line():
+    return fmt.fmt(2)
 ''',
 }
-MAP = "| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n| Shape | a shape | - | `Shape` | geometry |\n| Report | output | - | `Report` | output |\n"
+MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"
+       "| Shape | a shape | - | `Shape` | geometry |\n| Report | output | - | `Report` | output |\n")
 
 
 def test_objects_representation_rules(tmp_path):
@@ -267,21 +264,23 @@ def test_objects_representation_rules(tmp_path):
     try:
         os.chdir(tmp_path)
         fns, objs = trace_objects.objects("lib")
-        edges = [{"from": "lib/use.py:Report", "to": "lib/shapes.py:Shape", "members": ["area"]},
-                 {"from": "lib/use.py:Report", "to": "lib/util.py", "members": ["fmt"]},
-                 {"from": "lib/other.py", "to": "lib/util.py", "members": ["fmt"]},
+        edges = [{"from": "lib/report/report.py:Report", "to": "lib/shapes.py:Shape", "members": ["area"]},
+                 {"from": "lib/report/report.py:Report", "to": "lib/report/fmt.py", "members": ["fmt"]},
+                 {"from": "lib/util.py", "to": "lib/report/fmt.py", "members": ["fmt"]},
                  {"from": "lib/shapes.py:Shape", "to": "lib/shapes.py", "members": ["_square"]}]
         s = trace_objects.spec_of(objs, edges, "lib", "MAP.md")
     finally:
         os.chdir(cwd)
     N = {n["id"]: n for n in s["nodes"]}
-    assert N["lib/shapes.py:Shape"]["kind"] == "object" and "lib/shapes.py:Square" not in N
-    assert "lib/shapes.py" not in N                          # its helper folded into Shape
-    assert N["lib/util.py"]["kind"] == "external"            # two files use it: not encapsulated
-    assert N["lib/other.py"]["kind"] == "external"           # functions no class encapsulates
-    assert ("lib/use.py:Report", "lib/shapes.py:Shape") in {(e["from"], e["to"]) for e in s["edges"]}
+    assert "lib/shapes.py:Square" not in N and "lib/shapes.py" not in N   # subclass and helpers fold into Shape
+    assert N["lib/report/fmt.py"]["parent"] == "lib/report/report.py:Report"   # report/ names Report
+    assert N["lib/util.py"]["kind"] == "external"                              # the root folder owns nothing
+    assert [(m["into"], m["other_users"]) for m in s["moves"] if m["module"] == "lib/report/fmt.py"] == [
+        ("lib/report/report.py:Report", ["lib/util.py"])]                       # util goes around Report
     assert not [n for n in s["nodes"] if n["kind"] == "folder"]
-    assert [m["into"] for m in s["moves"] if m["module"] == "lib/util.py"] == ["lib/use.py:Report"]
+    assert "lib/util.py" in N["lib/report/fmt.py"]["flag"] or "util.py" in N["lib/report/fmt.py"]["flag"]
+    flagged = [(e["from"], e["to"]) for e in s["edges"] if e.get("flag")]
+    assert flagged == [("lib/util.py", "lib/report/fmt.py")]                   # the arrow around Report
 
 
 def test_build_nudges_a_kept_box_a_grown_neighbour_now_covers():

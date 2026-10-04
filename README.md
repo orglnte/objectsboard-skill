@@ -2,7 +2,8 @@
 
 A Claude Code skill for concepts, separation of concerns, encapsulation and
 abstraction: it translates a codebase's concepts into its actual objects and
-reviews the architecture for patterns, antipatterns and dark concepts. It
+reviews the architecture for patterns, antipatterns and dark concepts,
+interactively, through an Objects Board. It
 takes a concept map (what the software is for), reviews one object at a time
 (its whole interface, every outside caller, everything that reaches its files
 without it), draws the current state on a live board and lets you drag it

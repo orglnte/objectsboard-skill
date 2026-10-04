@@ -180,19 +180,23 @@ def nudge(d, i, step=30, rings=40):
 
 def build(spec, keep, stamp):
     old = {n["id"]: n for n in (keep or {}).get("nodes", [])}
+    old = {i: n for i, n in old.items()
+           if n.get("parent") == next((m.get("parent") for m in spec["nodes"] if m["id"] == i), None)}
     nodes, new = [], []
     for n in spec["nodes"]:
         m = {"id": n["id"], "name": n["name"], "kind": n.get("kind", "object"), "origin": n.get("origin", "library"),
              "members": n.get("members", []), "note": n.get("note", ""), "parent": n.get("parent"),
              "collapsed": n.get("collapsed", False), "x": 0, "y": 0}
-        if n["id"] in old:
+        if n.get("flag"):
+            m["flag"] = n["flag"]
+        if n["id"] in old and old[n["id"]].get("parent") == n.get("parent"):
             for k in ("x", "y", "w", "h", "collapsed"):
                 if k in old[n["id"]]:
                     m[k] = old[n["id"]][k]
         else:
             new.append(n["id"])
         nodes.append(m)
-    edges = [{k: e[k] for k in ("from", "to", "kind", "label") if k in e} | {"id": f"e{i + 1}"}
+    edges = [{k: e[k] for k in ("from", "to", "kind", "label", "flag") if k in e} | {"id": f"e{i + 1}"}
              for i, e in enumerate(spec["edges"])]
     name = spec["name"] + (f" ({stamp})" if stamp else "")
     d = {"name": name, "nodes": nodes, "edges": edges}
@@ -208,14 +212,15 @@ def build(spec, keep, stamp):
         y = byid[i]["y"] + HEAD + CPAD
         for k in kids.get(i, []):
             lay(k)
+        for k in kids.get(i, []):            # new parts go below the ones already placed
+            if k in old:
+                y = max(y, bounds(d)[k][1] + bounds(d)[k][3] + CPAD)
+        for k in kids.get(i, []):
             if k in old:
                 continue
             b = bounds(d)[k]
             move_tree(d, k, byid[i]["x"] + CPAD - b[0], y - b[1])
             y += bounds(d)[k][3] + CPAD
-        for k in kids.get(i, []):
-            if k in old:
-                y = max(y, bounds(d)[k][1] + bounds(d)[k][3] + CPAD)
 
     for n in nodes:
         if not n.get("parent") or n["parent"] not in byid:
@@ -239,9 +244,14 @@ def build(spec, keep, stamp):
         placed.add(i)
     # a kept box that now overlaps (a neighbour grew) moves to the nearest free
     # spot; the largest boxes stay, the smaller ones move
-    tops = sorted((n["id"] for n in nodes if not n.get("parent") or n["parent"] not in byid),
-                  key=lambda i: bounds(d)[i][2] * bounds(d)[i][3])
-    for i in tops:
+    def depth(i):
+        k, p = 0, byid[i].get("parent")
+        while p in byid:
+            k, p = k + 1, byid[p].get("parent")
+        return k
+
+    # inner boxes first (they make their owner's size), then the top level
+    for i in sorted(byid, key=lambda i: (-depth(i), bounds(d)[i][2] * bounds(d)[i][3])):
         if overlaps(d, i):
             nudge(d, i)
     return d

@@ -208,16 +208,15 @@ cannot see is not evidence that nothing is there.
    caller's box lists exactly the members it uses; each arrow reads
    `calls N members`. Callers nested by owner show which owner needs which
    slice.
-6. **Whole codebase (the objects representation):** boxes are the concept
-   classes (the concept map's Objects column), one arrow per pair of boxes
-   that call each other, and every module not encapsulated by a class is an
-   external box; subclasses fold into their base, helper classes and
-   same-file helper functions into their class, value classes go inside
-   their single producer, and a module goes inside a class only when the
-   imports and the run agree it is that class's alone. No box around
-   everything, no folder boxes, never the module import graph. An external
-   module whose only concept-class user is one class is listed as a move
-   into that class: carry it out, then redraw.
+6. **Whole codebase (the objects representation):** concept classes as
+   boxes, one arrow per pair, modules no class encapsulates as external
+   boxes. Placement from structure and the concept map: the map's
+   consistent declarations, then the file's concept class, then the
+   package's (named after its folder, never the root), composition and
+   subclassing between classes; usage never moves a box. Usage flags, in the
+   warning colour, the arrows that bypass an owner's interface and the
+   misplaced modules; those arrows are the refactoring worklist. No box
+   around everything, no folder boxes, never the module import graph.
 
 ## Pitfalls
 

@@ -143,18 +143,6 @@ def owners(root, objs):
     return {k: next(iter(v)) for k, v in kept.items() if len(v) == 1}
 
 
-def concept_classes(map_file, objs):
-    """The classes the concept map names in its Objects column (backticked
-    names in the table rows), among those traced."""
-    names = set()
-    for line in Path(map_file).read_text().splitlines():
-        cells = line.split("|")
-        if line.startswith("|") and len(cells) > 4:
-            names |= {n.split(".")[-1] if n[:1].isupper() and "." in n else n
-                      for n in re.findall(r"`([^`]+)`", cells[4] if len(cells) > 5 else cells[-2])}
-    return {oid for oid, o in objs.items() if o["kind"] == "class" and o["name"].split(".")[-1] in names}
-
-
 def class_facts(root):
     """Per class id: its base names, and whether it is a value class (a
     dataclass, NamedTuple, Enum or TypedDict, or a class with no public
@@ -203,6 +191,9 @@ def importers(root):
             t = ast.parse(p.read_text())
         except (SyntaxError, UnicodeDecodeError):
             continue
+        if p.name == "__init__.py" and not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                                               for n in t.body):
+            continue                          # a package __init__ that only re-exports uses nothing itself
         here = dotted(p)
         pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
         owner_of = {}
@@ -221,6 +212,7 @@ def importers(root):
                 mods = [base] + [f"{base}.{a.name}" for a in n.names]
             if isinstance(n, ast.Constant) and isinstance(n.value, str):
                 mods = [n.value] if n.value in by_name else []
+                mods += [n.value + ".__main__"] if n.value + ".__main__" in by_name else []
                 mods += [m for m, f in by_name.items() if n.value == f]
             for m in mods:
                 if m in by_name and by_name[m] != str(p):
@@ -228,126 +220,180 @@ def importers(root):
     return out
 
 
+def map_rows(map_file):
+    """[(objects cell text)] for each row of the concept map's table."""
+    rows = []
+    for line in Path(map_file).read_text().splitlines():
+        cells = [c.strip() for c in line.split("|")]
+        if line.startswith("|") and len(cells) > 6 and "`" in cells[4]:
+            rows.append(cells[4])
+    return rows
+
+
+def concept_classes(map_file, objs):
+    """The classes the concept map names in its Objects column."""
+    names = {n.split(".")[0] if n[:1].isupper() else n for row in map_rows(map_file)
+             for n in re.findall(r"`([^`]+)`", row)}
+    return {oid for oid, o in objs.items() if o["kind"] == "class" and o["name"].split(".")[-1] in names}
+
+
+def declared(map_file, keep, objs, root):
+    """{module path: owner class id or None} from the concept map: a module
+    or folder named in rows that each name exactly one concept class, the
+    same one, belongs to it; one marked "(external)" is external. A module
+    the rows assign differently is left to the other rules."""
+    out = {}
+    cls_by_name = {objs[k]["name"].split(".")[-1]: k for k in keep}
+    files = [str(p) for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts]
+
+    def match(name):
+        name = name.rstrip("/")
+        return [f for f in files if f.endswith("/" + name) or f.endswith("/" + name + ".py")
+                or ("/" + name + "/") in f or f.endswith("/" + name + "/__init__.py")]
+
+    votes = {}
+    for row in map_rows(map_file):
+        names = re.findall(r"`([^`]+)`(\s*\(external\))?", row)
+        owners = {cls_by_name[n.split(".")[0]] for n, _ in names if n.split(".")[0] in cls_by_name}
+        for n, ext in names:
+            if n.split(".")[0] in cls_by_name:
+                continue
+            for f in match(n):
+                votes.setdefault(f, set()).add(None if ext else (next(iter(owners)) if len(owners) == 1 else "?"))
+    for f, v in votes.items():
+        if len(v) == 1 and "?" not in v:
+            out[f] = next(iter(v))            # every row naming it agrees
+    return out
+
+
 def spec_of(objs, edges, root, concepts=None):
-    """The objects representation. Boxes are the classes that encapsulate a
-    concept (`concepts`: the concept map's Objects column; without one, every
-    class). A subclass of a concept class folds into its base's box; any other
-    class folds into the concept class of its file, else into its module; a
-    module's functions fold into the concept class of their file when that
-    class is their only caller at run time. A value class goes inside the one
-    box whose code constructs it. Another module is drawn inside a concept
-    class when every file that uses it (imports it, or launches it as a
-    process) belongs to that class, counted through what the class already
-    owns, and the run shows no other caller (none at all is noted as
-    untested); otherwise it is an external box. One arrow per pair."""
+    """The objects representation. Placement comes from structure and the
+    concept map, never from usage; usage only lists the bypasses.
+
+    1. The concept map declares it: a module named in a row with exactly one
+       concept class belongs to that class; one marked "(external)" is
+       external.
+    2. The file holds a concept class: its functions and helper classes
+       belong to that class (the class named after the file when it holds
+       several; the others nest inside it).
+    3. The package names its class: any other module belongs to the concept
+       class named after its folder (`cell/` -> Cell, `variants/` ->
+       Variant), or the nearest enclosing folder's; never the root's.
+    4. A concept class created and kept by exactly one other nests in it; a
+       subclass folds into its base.
+    5. Everything else is external.
+    6. A use of an owned module or class from outside its owner is a bypass,
+       listed as a move. One arrow per pair of boxes."""
+    rootp = Path(root)
     facts = class_facts(root)
-    cls = {oid for oid, o in objs.items() if o["kind"] == "class"}
-    keep = concept_classes(concepts, objs) if concepts else set(cls)
-    keep_by_name = {objs[k]["name"].split(".")[-1]: k for k in keep}
-    for oid in sorted(keep):                  # a concept class that subclasses another folds into it
-        base = next((keep_by_name[b] for b in facts.get(oid, {}).get("bases", []) if b in keep_by_name), None)
-        if base and base != oid:
-            keep.discard(oid)
-    by_file = {}
-    for oid in sorted(keep):
-        by_file.setdefault(objs[oid]["file"], oid)
-    box = {}
+    keep = concept_classes(concepts, objs) if concepts else {k for k, o in objs.items() if o["kind"] == "class"}
+    byname = {objs[k]["name"].split(".")[-1]: k for k in keep}
+    for k in sorted(keep):                    # 4b: a subclass folds into its base
+        if any(b in byname and byname[b] != k for b in facts.get(k, {}).get("bases", [])):
+            keep.discard(k)
+    decl = declared(concepts, keep, objs, root) if concepts else {}
+
+    def primary_of_file(f):
+        ks = [k for k in keep if objs[k]["file"] == f]
+        stem = Path(f).parent.name if Path(f).name == "__init__.py" else Path(f).stem
+        named = [k for k in ks if objs[k]["name"].split(".")[-1].lower() == stem.replace("_", "").lower()]
+        return (named or sorted(ks) or [None])[0]
+
+    def primary_of_dir(d):
+        for k in sorted(keep):
+            n = objs[k]["name"].split(".")[-1].lower()
+            if Path(objs[k]["file"]).parent == d and d.name.lower() in (n, n + "s"):
+                return k
+        return None
+
+    def owner_of_file(f):
+        """(owner class id or None, rule) for the code in file f."""
+        p = Path(f)
+        for key in (f, *[str(x) for x in p.parents]):
+            if key in decl:
+                return decl[key], 1
+        c = primary_of_file(f)
+        if c:
+            return c, 2
+        for d in p.parents:
+            if d == rootp or rootp not in d.parents:
+                break
+            c = primary_of_dir(d)
+            if c:
+                return c, 3
+        return None, 5
+
+    # every traced object -> the box it is drawn in, and that box's owner
+    box, parent = {}, {}
     for oid, o in objs.items():
         if oid in keep:
             box[oid] = oid
+            prim = primary_of_file(o["file"])
+            dec = decl.get(o["file"])
+            if dec and dec != oid:
+                parent[oid] = dec             # rule 1: its file is declared another class's
+            elif prim and prim != oid:
+                parent[oid] = prim            # rule 2: a second concept class in a file nests in its primary
             continue
-        base = next((keep_by_name[b] for b in facts.get(oid, {}).get("bases", [])
-                     if b in keep_by_name and keep_by_name[b] in keep), None)
         if o["kind"] == "class":
-            box[oid] = base or by_file.get(o["file"], o["file"])
+            base = next((byname[b] for b in facts.get(oid, {}).get("bases", []) if b in byname and byname[b] in keep), None)
+            if base:
+                box[oid] = base
+                continue
+        owner, rule = owner_of_file(o["file"])
+        if rule == 2:
+            box[oid] = owner                  # helpers of the class in their file
+        elif owner is not None:
+            box[oid] = o["file"]              # a module of its owner's package: drawn inside it
+            parent[o["file"]] = owner
         else:
-            box[oid] = oid
-    # a module's functions fold into the concept class of their file when, at
-    # run time, that class (or its own parts) is their only caller
-    run_callers = {}
-    for e in edges:
-        run_callers.setdefault(e["to"], set()).add(box.get(e["from"], e["from"]))
-    for oid, o in objs.items():
-        if o["kind"] == "module" and o["file"] in by_file:
-            owner = by_file[o["file"]]
-            if run_callers.get(oid, set()) <= {owner}:
-                box[oid] = owner
-    # a value class goes inside the one box (class or module) whose code constructs it
-    value_in = {}
-    for v in [k for k in keep if facts.get(k, {}).get("value")]:
-        short = objs[v]["name"].split(".")[-1]
-        makers = {box.get(x, x) for x, f in facts.items() if short in f.get("makes", ()) and box.get(x, x) != v}
-        if len(makers) == 1:
-            value_in[v] = next(iter(makers))
+            box[oid] = o["file"]              # external
+    kept_by = owners(root, objs)
+    for k in sorted(keep):                    # 4a: composition
+        o = kept_by.get(k)
+        if o in keep and o != k and k not in parent:
+            parent[k] = o
     pairs = {}
     for e in edges:
         a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
-        if a == b:
-            continue
-        pairs.setdefault((a, b), set()).update(e["members"])
-    imp = importers(root)
-    callers = {}
-    for (a, b) in pairs:
-        callers.setdefault(b, set()).add(a)
-    mod_ids = {oid for oid, o in objs.items() if o["kind"] == "module" and box.get(oid) == oid}
-    inside = {}
+        if a != b:
+            pairs.setdefault((a, b), set()).update(e["members"])
 
-    def up(b):
-        while b in inside:
-            b = inside[b]
+    def top(b):
+        while b in parent:
+            b = parent[b]
         return b
 
-    def box_of_use(use):
-        """The box a use belongs to: the class whose code contains it (its
-        box), else the box the file's module code is drawn in, followed
-        through ownership."""
-        f, cname = use
-        b = box.get(f"{f}:{cname}") if cname else None
-        b = b or box.get(f, f)
-        while b in inside:
-            b = inside[b]
-        return b
+    def within(a, b):                         # a is b, or holds b
+        while b is not None:
+            if a == b:
+                return True
+            b = parent.get(b)
+        return False
 
-    for _ in range(3):                        # ownership through owned modules settles in a few passes
-        for m in sorted(mod_ids):
-            users = {box_of_use(u) for u in imp.get(objs[m]["file"], set())}
-            run = {up(c) for c in callers.get(m, set())}
-            owner = next(iter(users)) if len(users) == 1 else None
-            if owner in keep and run <= {owner}:
-                inside[m] = owner
-            else:
-                inside.pop(m, None)
-    untested = {m for m in inside if m in mod_ids and not callers.get(m)}
-    for v, owner in value_in.items():
-        inside[v] = owner
-    nodes, used = [], {x for pair in pairs for x in pair} | set(inside)
-    for oid in sorted(used):
-        o = objs.get(oid, {"name": Path(oid).stem, "file": oid, "kind": "module"})
-        f = Path(o["file"])
-        if oid in keep:
-            subs = sorted(objs[k]["name"] for k, b in box.items() if b == oid and k != oid and objs.get(k, {}).get("kind") == "class"
-                          and any(x == objs[oid]["name"].split(".")[-1] for x in facts.get(k, {}).get("bases", [])))
-            nodes.append({"id": oid, "name": o["name"], "kind": "object", "parent": inside.get(oid),
+    used = {x for pair in pairs for x in pair}
+    frontier = set(used)
+    while frontier:
+        frontier = {parent[x] for x in frontier if x in parent} - used
+        used |= frontier
+    nodes = []
+    for b in sorted(used):
+        if b in objs and objs[b]["kind"] == "class":
+            o = objs[b]
+            subs = sorted(objs[k]["name"] for k, v in box.items() if v == b and k != b
+                          and objs.get(k, {}).get("kind") == "class"
+                          and o["name"].split(".")[-1] in facts.get(k, {}).get("bases", []))
+            nodes.append({"id": b, "name": o["name"], "kind": "object", "parent": parent.get(b),
                           "members": [{"vis": "+", "name": "subclasses: " + ", ".join(subs)}] if subs else [],
                           "note": o["file"]})
         else:
+            f = Path(b)
             label = (str(f.parent) + "/") if f.name == "__init__.py" else f.name
-            nodes.append({"id": oid, "name": label, "kind": "module" if oid in inside else "external",
-                          "parent": inside.get(oid),
-                          "note": o["file"] + ("  (untested at run time)" if oid in untested else "")})
-    parent = {n["id"]: n["parent"] for n in nodes}
-
-    def nested(a, b):
-        p = parent.get(b)
-        while p:
-            if p == a:
-                return True
-            p = parent.get(p)
-        return False
-
+            nodes.append({"id": b, "name": label, "kind": "module" if b in parent else "external",
+                          "parent": parent.get(b), "note": b})
     E = []
     for (a, b), ms in sorted(pairs.items()):
-        if nested(a, b) or nested(b, a):
+        if within(a, b) or within(b, a):
             continue                          # ownership is the nesting
         ms = sorted(ms)
         label = " · ".join(ms[:3]) + (f"  (+{len(ms) - 3})" if len(ms) > 3 else "")
@@ -363,22 +409,46 @@ def spec_of(objs, edges, root, concepts=None):
                  else {"observed": "called at run time through a subclass, a callback or an injected function"})
         E.append({"from": a, "to": b, "kind": "calls", "label": label + ("" if named else "  [run time only]"),
                   "proof": [proof]})
-    # moves: an external module whose only concept-class user is one class
-    # (its other users are external modules, or none) belongs in that class
-    moves = []
-    for oid in sorted(n["id"] for n in nodes if n["kind"] == "external"):
-        users = ({box_of_use(u) for u in imp.get(objs.get(oid, {"file": oid})["file"], set())}
-                 | {up(c) for c in callers.get(oid, set())})
-        users.discard(oid)
-        concept_users = users & keep
-        if len(concept_users) == 1:
-            owner = next(iter(concept_users))
-            others = sorted(users - {owner})
-            moves.append({"module": oid, "into": owner, "other_users": others,
-                          "why": (f"{objs[owner]['name']} is its only concept-class user"
-                                  + (f"; {len(others)} external module(s) also use it and would reach it through "
-                                     f"{objs[owner]['name']}" if others else ""))})
-    return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": moves}
+    # 6: bypasses, from imports and from the run
+    imp = importers(root)
+    moves = {}
+
+    def box_of_use(use):
+        f, cname = use
+        return box.get(f"{f}:{cname}") if cname and f"{f}:{cname}" in box else box.get(f, f)
+
+    for b in used:
+        if b not in parent:
+            continue
+        owner = top(b)
+        users = set()
+        if b in objs:
+            users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b}
+        else:
+            users |= {box_of_use(u) for u in imp.get(b, set())}
+            users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b}
+        out = sorted(u for u in users if top(u) != owner)
+        if out:
+            moves[b] = {"module": b, "into": owner, "other_users": out,
+                        "why": f"belongs to {objs[owner]['name']} (rule {owner_of_file(objs.get(b, {'file': b})['file'])[1]}); "
+                               f"{len(out)} user(s) outside it should go through {objs[owner]['name']}"}
+    # flags: a part called directly from outside its owner (bypassed), and a
+    # module that sits in an owner's folder but belongs to no class (misplaced)
+    N = {n["id"]: n for n in nodes}
+    for b, m in moves.items():
+        if b in N:
+            N[b]["flag"] = "called directly from outside " + objs[m["into"]]["name"] + ": " + ", ".join(
+                Path(u.split(":")[0]).name + (":" + u.split(":")[1] if ":" in u else "") for u in m["other_users"])
+    for n in nodes:
+        if n["kind"] == "external" and owner_of_file(n["id"])[1] == 1:
+            p = Path(n["id"])
+            if any(primary_of_dir(d) for d in p.parents if d != rootp and rootp in d.parents):
+                n["flag"] = f"misplaced: in {p.parent}/ but no class owns it"
+    for e in E:
+        b = e["to"]
+        if b in parent and not within(top(b), e["from"]):
+            e["flag"] = "bypass: reaches " + N[b]["name"] + " directly, not through " + objs[top(b)]["name"]
+    return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)]}
 
 
 def main():

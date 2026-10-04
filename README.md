@@ -45,9 +45,10 @@ Then `/objectsboard` in Claude Code.
    outside use, as JSON, for a module, a class or a function; for classes it
    follows factories, parameters, stand-ins and attributes or properties that
    hold an instance.
-4. `tools/trace_objects.py`: the object graph of a whole codebase (classes,
-   and modules with functions of their own), one arrow per pair, from the
-   test suite's run; writes a board spec grouped by folder.
+4. `tools/trace_objects.py`: the objects representation of a whole
+   codebase: its concept classes, one arrow per pair of classes that call
+   each other, modules not encapsulated by a class as external boxes; from
+   the test suite's run and the source.
 5. `tools/trace_uses.py`: the run-time cross-check and the call graph into
    the object, recorded while the test suite runs (needs good test coverage;
    Python 3.11+).

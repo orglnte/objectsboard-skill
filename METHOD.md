@@ -87,13 +87,12 @@ decided.
    attributes or properties with `--attr`), so say so on the page.
 2. **`file_contracts.py`**: every quoted mention of the given file names,
    with two lines of context.
-3. **`trace_objects.py`**: the object graph of a whole codebase from the
-   test suite's run: every class, and every module with functions of its
-   own, is an object; each call from one object into another is recorded
-   (closures and frames outside the project walked past); `--spec` writes a
-   board spec, objects grouped by folder, one arrow per pair. An arrow the
-   caller's file does not name (a subclass, a callback, an injected
-   function) is marked "[run time only]" with the observation as proof.
+3. **`trace_objects.py`**: the objects representation of a whole codebase
+   (view 6) from the test suite's run and the source: `--concepts` names
+   the concept map whose Objects column picks the classes drawn; `--spec`
+   writes the board spec. An arrow the caller's file does not name (a
+   subclass, a callback, an injected function) is marked "[run time only]"
+   with the observation as proof.
 4. **`trace_uses.py`**: runs the test suite (pytest, in process, under the
    project's own interpreter) with a profiler and records every call into the target's
    functions and the caller outside it: the call graph into the target.
@@ -209,10 +208,14 @@ cannot see is not evidence that nothing is there.
    caller's box lists exactly the members it uses; each arrow reads
    `calls N members`. Callers nested by owner show which owner needs which
    slice.
-6. **Whole codebase:** objects, not modules (`trace_objects.py`): one box
-   per class and per module with functions of its own, grouped by folder,
-   collapsed arrows. Never a box around everything, never the module import
-   graph (it hides which objects depend on which).
+6. **Whole codebase (the objects representation):** boxes are the concept
+   classes (the concept map's Objects column), one arrow per pair of boxes
+   that call each other, and every module not encapsulated by a class is an
+   external box; subclasses fold into their base, helper classes and
+   same-file helper functions into their class, value classes go inside
+   their single producer, and a module goes inside a class only when the
+   imports and the run agree it is that class's alone. No box around
+   everything, no folder boxes, never the module import graph.
 
 ## Pitfalls
 

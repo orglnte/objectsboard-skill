@@ -12,9 +12,13 @@ records each call from one object into another; calls inside one object are
 not recorded. Closures (decorator wrappers, lambdas) and frames outside the
 project are walked past, so a call is charged to the object that made it.
 
---spec writes a board spec for board.py: one box per object, grouped by its
-folder (the folders under --root, never one box around everything), one
-arrow per pair labelled with the members called, each with a proof: one of
+--spec writes a board spec for board.py: one box per class that encapsulates
+a concept (--concepts: the concept map's Objects column; without it, every
+class); a helper class folds into the concept class of its file, else into
+its module; a module called by one concept class only is drawn inside it,
+any other module is an external box; no folder boxes and no box around
+everything; one arrow per pair of boxes, labelled with the members called,
+each with a proof: one of
 those members, or the callee's name, appears in the caller's file; when
 neither does (a subclass, a callback, an injected function), the arrow is
 marked "[run time only]" and its proof is the observation itself.
@@ -99,37 +103,228 @@ def run(root, pytest_args, tests_dir):
     return rc, hits, objs
 
 
-def spec_of(objs, edges, root):
-    used = {e["from"] for e in edges} | {e["to"] for e in edges}
-    folders, nodes = {}, []
-    for oid in sorted(used):
-        o = objs[oid]
-        d = str(Path(o["file"]).parent)
-        folders.setdefault(d, f"f{len(folders) + 1}")
-    for d, fid in folders.items():
-        nodes.append({"id": fid, "name": d + "/", "kind": "folder", "parent": None})
-    for oid in sorted(used):
-        o = objs[oid]
-        nodes.append({"id": oid, "name": o["name"] + ("" if o["kind"] == "class" else ".py"),
-                      "kind": "object" if o["kind"] == "class" else "module",
-                      "parent": folders[str(Path(o["file"]).parent)], "note": o["file"]})
-    E = []
+def owners(root, objs):
+    """{class id: owner class id} for a class created and kept by exactly one
+    other class (`self.x = Other(...)` in its body, also inside `a or b` and
+    `a if c else b`). A class kept by several owners has none: it is shared."""
+    by_name = {}
+    for oid, o in objs.items():
+        if o["kind"] == "class":
+            by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
+    kept = {}
+    for p in sorted(Path(root).rglob("*.py")):
+        if "__pycache__" in p.parts:
+            continue
+        try:
+            t = ast.parse(p.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
+            owner = f"{p}:{c.name}"
+            if owner not in objs:
+                continue
+            for n in ast.walk(c):
+                if not isinstance(n, (ast.Assign, ast.AnnAssign)):
+                    continue
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                if not any(isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "self"
+                           for x in targets) or n.value is None:
+                    continue
+                for call in [x for x in ast.walk(n.value) if isinstance(x, ast.Call)]:
+                    f = call.func
+                    name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+                    for kid in by_name.get(name, []):
+                        if kid != owner:
+                            kept.setdefault(kid, set()).add(owner)
+    return {k: next(iter(v)) for k, v in kept.items() if len(v) == 1}
+
+
+def concept_classes(map_file, objs):
+    """The classes the concept map names in its Objects column (backticked
+    names in the table rows), among those traced."""
+    names = set()
+    for line in Path(map_file).read_text().splitlines():
+        cells = line.split("|")
+        if line.startswith("|") and len(cells) > 4:
+            names |= {n.split(".")[-1] if n[:1].isupper() and "." in n else n
+                      for n in re.findall(r"`([^`]+)`", cells[4] if len(cells) > 5 else cells[-2])}
+    return {oid for oid, o in objs.items() if o["kind"] == "class" and o["name"].split(".")[-1] in names}
+
+
+def class_facts(root):
+    """Per class id: its base names, and whether it is a value class (a
+    dataclass, NamedTuple, Enum or TypedDict, or a class with no public
+    method of its own)."""
+    out = {}
+    for p in sorted(Path(root).rglob("*.py")):
+        if "__pycache__" in p.parts:
+            continue
+        try:
+            t = ast.parse(p.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
+            bases = [ast.unparse(b).split(".")[-1] for b in c.bases]
+            decos = [ast.unparse(d) for d in c.decorator_list]
+            public = [f for f in c.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and not f.name.startswith("_")]
+            value = (any("dataclass" in d for d in decos) or {"NamedTuple", "Enum", "IntEnum", "TypedDict"} & set(bases)
+                     or not public)
+            makes = {n.func.id if isinstance(n.func, ast.Name) else n.func.attr
+                     for n in ast.walk(c) if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute))}
+            out[f"{p}:{c.name}"] = {"bases": bases, "value": bool(value), "makes": makes}
+        in_classes = {id(x) for c in ast.walk(t) if isinstance(c, ast.ClassDef) for x in ast.walk(c)}
+        out[str(p)] = {"bases": [], "value": False,
+                       "makes": {n.func.id if isinstance(n.func, ast.Name) else n.func.attr
+                                 for n in ast.walk(t) if isinstance(n, ast.Call) and id(n) not in in_classes
+                                 and isinstance(n.func, (ast.Name, ast.Attribute))}}
+    return out
+
+
+def importers(root):
+    """{module file: {files that import it}} for the modules under root."""
+    files = {p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts}
+
+    def dotted(p):
+        parts = list(p.with_suffix("").parts)
+        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+    by_name = {dotted(p): str(p) for p in files}
+    out = {}
+    for p in files:
+        try:
+            t = ast.parse(p.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        here = dotted(p)
+        pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
+        for n in ast.walk(t):
+            mods = []
+            if isinstance(n, ast.Import):
+                mods = [a.name for a in n.names]
+            elif isinstance(n, ast.ImportFrom):
+                base = n.module or ""
+                if n.level:
+                    up = pkg.split(".")[: len(pkg.split(".")) - (n.level - 1)]
+                    base = ".".join(up + ([n.module] if n.module else []))
+                mods = [base] + [f"{base}.{a.name}" for a in n.names]
+            for m in mods:
+                if m in by_name and by_name[m] != str(p):
+                    out.setdefault(by_name[m], set()).add(str(p))
+    return out
+
+
+def spec_of(objs, edges, root, concepts=None):
+    """The objects representation. Boxes are the classes that encapsulate a
+    concept (`concepts`: the concept map's Objects column; without one, every
+    class). A subclass of a concept class folds into its base's box; any other
+    class folds into the concept class of its file, else into its module; a
+    module's functions fold into the concept class of their file when that
+    class is their only caller at run time. A value class goes inside the one
+    box whose code constructs it. Another module is drawn inside a concept
+    class when that class is its only caller both statically (only the
+    class's file imports it) and at run time; otherwise it is an external
+    box. One arrow per pair of boxes."""
+    facts = class_facts(root)
+    cls = {oid for oid, o in objs.items() if o["kind"] == "class"}
+    keep = concept_classes(concepts, objs) if concepts else set(cls)
+    keep_by_name = {objs[k]["name"].split(".")[-1]: k for k in keep}
+    for oid in sorted(keep):                  # a concept class that subclasses another folds into it
+        base = next((keep_by_name[b] for b in facts.get(oid, {}).get("bases", []) if b in keep_by_name), None)
+        if base and base != oid:
+            keep.discard(oid)
+    by_file = {}
+    for oid in sorted(keep):
+        by_file.setdefault(objs[oid]["file"], oid)
+    box = {}
+    for oid, o in objs.items():
+        if oid in keep:
+            box[oid] = oid
+            continue
+        base = next((keep_by_name[b] for b in facts.get(oid, {}).get("bases", [])
+                     if b in keep_by_name and keep_by_name[b] in keep), None)
+        if o["kind"] == "class":
+            box[oid] = base or by_file.get(o["file"], o["file"])
+        else:
+            box[oid] = oid
+    # a module's functions fold into the concept class of their file when, at
+    # run time, that class (or its own parts) is their only caller
+    run_callers = {}
     for e in edges:
-        ms = e["members"]
+        run_callers.setdefault(e["to"], set()).add(box.get(e["from"], e["from"]))
+    for oid, o in objs.items():
+        if o["kind"] == "module" and o["file"] in by_file:
+            owner = by_file[o["file"]]
+            if run_callers.get(oid, set()) <= {owner}:
+                box[oid] = owner
+    # a value class goes inside the one box (class or module) whose code constructs it
+    value_in = {}
+    for v in [k for k in keep if facts.get(k, {}).get("value")]:
+        short = objs[v]["name"].split(".")[-1]
+        makers = {box.get(x, x) for x, f in facts.items() if short in f.get("makes", ()) and box.get(x, x) != v}
+        if len(makers) == 1:
+            value_in[v] = next(iter(makers))
+    pairs = {}
+    for e in edges:
+        a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
+        if a == b:
+            continue
+        pairs.setdefault((a, b), set()).update(e["members"])
+    imp = importers(root)
+    modules = {x for pair in pairs for x in pair if x not in keep}
+    callers = {}
+    for (a, b) in pairs:
+        if b in modules:
+            callers.setdefault(b, set()).add(a)
+    inside = {}
+    for m, c in callers.items():
+        owner = next(iter(c)) if len(c) == 1 else None
+        if owner in keep and imp.get(objs.get(m, {"file": m})["file"], set()) <= {objs[owner]["file"]}:
+            inside[m] = owner
+    for v, owner in value_in.items():
+        inside[v] = owner
+    nodes, used = [], {x for pair in pairs for x in pair}
+    for oid in sorted(used):
+        o = objs.get(oid, {"name": Path(oid).stem, "file": oid, "kind": "module"})
+        f = Path(o["file"])
+        if oid in keep:
+            subs = sorted(objs[k]["name"] for k, b in box.items() if b == oid and k != oid and objs.get(k, {}).get("kind") == "class"
+                          and any(x == objs[oid]["name"].split(".")[-1] for x in facts.get(k, {}).get("bases", [])))
+            nodes.append({"id": oid, "name": o["name"], "kind": "object", "parent": inside.get(oid),
+                          "members": [{"vis": "+", "name": "subclasses: " + ", ".join(subs)}] if subs else [],
+                          "note": o["file"]})
+        else:
+            label = (str(f.parent) + "/") if f.name == "__init__.py" else f.name
+            nodes.append({"id": oid, "name": label, "kind": "module" if oid in inside else "external",
+                          "parent": inside.get(oid), "note": o["file"]})
+    parent = {n["id"]: n["parent"] for n in nodes}
+
+    def nested(a, b):
+        p = parent.get(b)
+        while p:
+            if p == a:
+                return True
+            p = parent.get(p)
+        return False
+
+    E = []
+    for (a, b), ms in sorted(pairs.items()):
+        if nested(a, b) or nested(b, a):
+            continue                          # ownership is the nesting
+        ms = sorted(ms)
         label = " · ".join(ms[:3]) + (f"  (+{len(ms) - 3})" if len(ms) > 3 else "")
-        names = [m for m in ms if not m.startswith("__")] + [objs[e["to"]]["name"].split(".")[-1]]
-        if objs[e["to"]]["kind"] == "module":
-            names.append(Path(objs[e["to"]]["file"]).stem)
+        callee = objs.get(b, {"name": Path(b).stem, "kind": "module", "file": b})
+        names = [m for m in ms if not m.startswith("__")] + [callee["name"].split(".")[-1], Path(callee["file"]).stem]
         pattern = r"\b(" + "|".join(re.escape(n) for n in names) + r")\b"
-        caller_file = objs[e["from"]]["file"]
+        caller_file = objs.get(a, {"file": a})["file"]
         try:
             named = re.search(pattern, Path(caller_file).read_text(errors="replace")) is not None
         except OSError:
             named = False
         proof = ({"file": caller_file, "pattern": pattern} if named
                  else {"observed": "called at run time through a subclass, a callback or an injected function"})
-        E.append({"from": e["from"], "to": e["to"], "kind": "calls",
-                  "label": label + ("" if named else "  [run time only]"), "proof": [proof]})
+        E.append({"from": a, "to": b, "kind": "calls", "label": label + ("" if named else "  [run time only]"),
+                  "proof": [proof]})
     return {"name": f"{root} — objects", "nodes": nodes, "edges": E}
 
 
@@ -138,6 +333,7 @@ def main():
     ap.add_argument("--root", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--spec")
+    ap.add_argument("--concepts", help="the concept map (markdown); its Objects column picks the classes drawn")
     ap.add_argument("--tests-dir", default="tests")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER)
     a = ap.parse_args()
@@ -153,7 +349,7 @@ def main():
     json.dump({"root": a.root, "pytest_exit": int(rc), "objects": objs, "edges": edges},
               open(a.out, "w"), indent=1)
     if a.spec:
-        json.dump(spec_of(objs, edges, a.root), open(a.spec, "w"), indent=1)
+        json.dump(spec_of(objs, edges, a.root, a.concepts), open(a.spec, "w"), indent=1)
     print(f"{len({e['from'] for e in edges} | {e['to'] for e in edges})} objects, {len(edges)} object pairs; "
           f"pytest exit {rc}", file=sys.stderr)
     return 0

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -189,3 +190,94 @@ def test_trace_objects_records_calls_between_objects_not_within_one(app):
     s = json.loads(spec.read_text())
     assert not [n for n in s["nodes"] if n["kind"] == "folder" and n.get("parent")]
     assert board.check(s, app) == []
+
+
+def test_build_stacks_new_nested_boxes_inside_their_parent_without_overlap():
+    spec = {"name": "n", "nodes": [{"id": "o", "name": "Owner"}, {"id": "a", "name": "PartA", "parent": "o"},
+                                   {"id": "b", "name": "PartB", "parent": "o"}, {"id": "u", "name": "User"}],
+            "edges": [{"from": "u", "to": "o", "kind": "calls", "label": "run"}]}
+    d = board.build(spec, None, None)
+    assert board.overlaps(d, "a") == [] and board.overlaps(d, "b") == [] and board.overlaps(d, "u") == []
+    B = board.bounds(d)
+    assert B["o"][0] <= B["a"][0] and B["a"][1] + B["a"][3] <= B["o"][1] + B["o"][3]
+
+
+REPR = {
+    "lib/__init__.py": "",
+    "lib/shapes.py": '''
+from dataclasses import dataclass
+
+
+@dataclass
+class Area:
+    value: float
+
+
+class Shape:
+    def area(self):
+        return Area(self._size())
+
+    def _size(self):
+        return _square(2)
+
+
+class Square(Shape):
+    pass
+
+
+def _square(x):
+    return x * x
+''',
+    "lib/util.py": '''
+def fmt(x):
+    return str(x)
+''',
+    "lib/other.py": '''
+from lib import util
+
+
+def line():
+    return util.fmt(2)
+''',
+    "lib/use.py": '''
+from lib.shapes import Square
+from lib import util
+
+
+class Report:
+    def show(self):
+        return util.fmt(Square().area().value)
+
+
+def top():
+    return util.fmt(1)
+''',
+}
+MAP = "| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n| Shape | a shape | - | `Shape` | geometry |\n| Report | output | - | `Report` | output |\n"
+
+
+def test_objects_representation_rules(tmp_path):
+    import trace_objects
+    for rel, text in REPR.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(MAP)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        edges = [{"from": "lib/use.py:Report", "to": "lib/shapes.py:Shape", "members": ["area"]},
+                 {"from": "lib/use.py:Report", "to": "lib/util.py", "members": ["fmt"]},
+                 {"from": "lib/other.py", "to": "lib/util.py", "members": ["fmt"]},
+                 {"from": "lib/shapes.py:Shape", "to": "lib/shapes.py", "members": ["_square"]}]
+        s = trace_objects.spec_of(objs, edges, "lib", "MAP.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/shapes.py:Shape"]["kind"] == "object" and "lib/shapes.py:Square" not in N
+    assert "lib/shapes.py" not in N                          # its helper folded into Shape
+    assert N["lib/util.py"]["kind"] == "external"            # two files use it: not encapsulated
+    assert N["lib/other.py"]["kind"] == "external"           # functions no class encapsulates
+    assert ("lib/use.py:Report", "lib/shapes.py:Shape") in {(e["from"], e["to"]) for e in s["edges"]}
+    assert not [n for n in s["nodes"] if n["kind"] == "folder"]

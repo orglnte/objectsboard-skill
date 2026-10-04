@@ -37,19 +37,30 @@ It covers:
    that interpreter needs pytest and the project's dependencies. Caller
    names are fully qualified on Python 3.11+.
 
-## The whole codebase
+## The whole codebase: the objects representation (Python)
 
-When the user wants to see everything, draw **objects**, not modules: one
-box per class, and per module that has functions of its own, grouped by
-folder, one arrow per pair of objects that call each other, from
-`tools/trace_objects.py` (the test suite's run). Defaults:
+When the user wants to see everything, draw the objects representation from
+`tools/trace_objects.py --concepts <concept map> --spec ...` (the test suite's
+run plus the source):
 
-1. Never draw one box around everything: the folders are the top level.
-2. Never draw the module import graph as the whole-codebase board: imports
-   between modules hide which objects depend on which, and their arrows
-   form a jungle.
-3. Collapsed arrows (one per pair); the board's "All arrows" button then
-   shows only the selected object's.
+1. **Boxes are the classes that encapsulate a concept:** the classes the
+   concept map's Objects column names.
+2. **One arrow per pair of boxes that call each other**, labelled with the
+   members called.
+3. **A module not encapsulated by a class is an external box.**
+4. **What folds where:**
+   1. a subclass of a concept class folds into its base's box (listed as a
+      member);
+   2. a helper class folds into the concept class of its file;
+   3. a module's functions fold into the concept class of their file when
+      that class is their only caller at run time;
+   4. a value class (a dataclass, NamedTuple, Enum, or a class with no public
+      method) goes inside the one box whose code constructs it;
+   5. another module goes inside a concept class only when that class is its
+      only caller both statically (only its file imports the module) and at
+      run time.
+5. **Never:** one box around everything, folder boxes, or the module import
+   graph as the whole-codebase board.
 
 ## Input
 

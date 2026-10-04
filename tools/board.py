@@ -179,17 +179,40 @@ def build(spec, keep, stamp):
              for i, e in enumerate(spec["edges"])]
     name = spec["name"] + (f" ({stamp})" if stamp else "")
     d = {"name": name, "nodes": nodes, "edges": edges}
-    placed = set(old) & {n["id"] for n in nodes}
+    byid = {n["id"]: n for n in nodes}
+    kids = {}
+    for n in nodes:
+        if n.get("parent") in byid:
+            kids.setdefault(n["parent"], []).append(n["id"])
+
+    def lay(i):
+        """Stack i's new children in a column under its header, each child's
+        own children laid out first, so a tree moves as one."""
+        y = byid[i]["y"] + HEAD + CPAD
+        for k in kids.get(i, []):
+            lay(k)
+            if k in old:
+                continue
+            b = bounds(d)[k]
+            move_tree(d, k, byid[i]["x"] + CPAD - b[0], y - b[1])
+            y += bounds(d)[k][3] + CPAD
+        for k in kids.get(i, []):
+            if k in old:
+                y = max(y, bounds(d)[k][1] + bounds(d)[k][3] + CPAD)
+
+    for n in nodes:
+        if not n.get("parent") or n["parent"] not in byid:
+            lay(n["id"])
+    placed = {i for i in old if i in byid and not byid[i].get("parent")}
     for i in new:
-        node = next(n for n in nodes if n["id"] == i)
-        if node.get("parent"):
-            par = next(n for n in nodes if n["id"] == node["parent"])
-            node["x"], node["y"] = par["x"] + CPAD, par["y"] + HEAD + CPAD
+        if byid[i].get("parent") in byid:
             continue
         peers = {}
         for e in edges:
             if i in (e["from"], e["to"]):
                 o = e["to"] if e["from"] == i else e["from"]
+                while byid.get(o, {}).get("parent") in byid:
+                    o = byid[o]["parent"]
                 if o in placed:
                     peers[o] = peers.get(o, 0) + 1
         if peers:

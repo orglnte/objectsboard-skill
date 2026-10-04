@@ -70,6 +70,11 @@ arrow is a bypass.
 through the owner (information hiding, the aggregate root, the Law of
 Demeter; see METHOD.md).
 
+**Arrows:** all legitimate calls and accesses between two owners are one
+arrow between the owners themselves, whichever of their parts make or
+receive them; a bypass keeps its own red arrow, from the exact part that
+makes it.
+
 **Usage only shows what is wrong, in the warning colour:**
 
 1. **Bypass arrows:** an arrow from outside an owner straight into one of its

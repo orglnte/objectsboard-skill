@@ -565,6 +565,28 @@ def spec_of(objs, edges, root, concepts=None):
         b = e["to"]
         if b in parent and not within(top(b), e["from"]):
             e["flag"] = "bypass: reaches " + N[b]["name"] + " directly, not through " + objs[top(b)]["name"]
+    # every legitimate call or access between two owners is one arrow between
+    # the owners themselves; a bypass keeps its own arrow, from the exact part
+    merged, keep_edges = {}, []
+    for e in E:
+        if e.get("flag"):
+            keep_edges.append(e)
+            continue
+        a2, b2 = top(e["from"]), top(e["to"]) if not e["to"].startswith("resource:") else e["to"]
+        if a2 == b2:
+            continue
+        m = merged.setdefault((a2, b2), {"from": a2, "to": b2, "kinds": [], "labels": [], "proof": []})
+        m["kinds"].append(e["kind"])
+        for part in (x.strip() for x in e["label"].replace("  [run time only]", "").split(" · ")):
+            if part and not part.startswith("(+") and part not in m["labels"]:
+                m["labels"].append(part)
+        m["proof"] += [p for p in e["proof"] if p not in m["proof"]]
+    for (a2, b2), m in sorted(merged.items()):
+        labs = m["labels"]
+        keep_edges.append({"from": a2, "to": b2, "kind": next(k for k in ("writes", "spawns", "calls", "reads") if k in m["kinds"]),
+                           "label": " · ".join(labs[:3]) + (f"  (+{len(labs) - 3})" if len(labs) > 3 else ""),
+                           "proof": m["proof"][:1]})
+    E[:] = keep_edges
     return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)]}
 
 

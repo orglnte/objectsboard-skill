@@ -23,6 +23,10 @@ else reaches it only through that owner. A concept class with its parts and
 its data is one unit; the class is its root. A red arrow on the board is an
 access that goes around the owner.
 
+On the board, all legitimate traffic between two owners is one arrow between
+the owners themselves; each bypass is its own red arrow from the exact part,
+since each is one fix.
+
 It is three established rules seen together:
 
 1. **Information hiding:** an owner hides its design decisions (its data's

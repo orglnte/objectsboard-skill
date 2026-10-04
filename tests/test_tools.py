@@ -298,3 +298,24 @@ def test_build_nudges_a_kept_box_a_grown_neighbour_now_covers():
     assert board.overlaps(d, "near") == [] and board.overlaps(d, "big") == []
     pos = {n["id"]: (n["x"], n["y"]) for n in d["nodes"]}
     assert pos["big"] == (0, 0)
+
+
+def test_legitimate_calls_between_two_owners_are_one_arrow(tmp_path):
+    import trace_objects
+    for rel, text in REPR.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (tmp_path / "MAP.md").write_text(MAP)
+    (tmp_path / "lib/report/fmt.py").write_text(REPR["lib/report/fmt.py"] + "\n\ndef width(s):\n    return len(s.area().value)\n")
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        edges = [{"from": "lib/report/report.py:Report", "to": "lib/shapes.py:Shape", "members": ["area"]},
+                 {"from": "lib/report/fmt.py", "to": "lib/shapes.py:Shape", "members": ["area"]}]
+        s = trace_objects.spec_of(objs, edges, "lib", "MAP.md")
+    finally:
+        os.chdir(cwd)
+    into_shape = [(e["from"], e["to"]) for e in s["edges"] if e["to"] == "lib/shapes.py:Shape"]
+    assert into_shape == [("lib/report/report.py:Report", "lib/shapes.py:Shape")]   # Report and its part: one arrow

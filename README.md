@@ -54,7 +54,8 @@ Then `/objectsboard` in Claude Code.
    page (the class as pseudo code, each caller and why it calls).
 7. `tools/board.py`: checks every arrow's proof against the code, lays a
    diagram out keeping the board's existing positions, refuses an arrow into
-   a box's own parts, and makes the simplified view.
+   a box's own parts, collapses arrows to one per pair of boxes, and makes the
+   simplified view.
 8. `tools/objects-board.html`: the board, published as a claude.ai artifact
    with a shared database (`capabilities: {db: {}}`).
 9. `tests/`: `python3 -m pytest tests -q`.

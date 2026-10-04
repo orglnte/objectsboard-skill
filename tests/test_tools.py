@@ -162,3 +162,14 @@ def test_check_refuses_an_arrow_between_a_container_and_its_own_part(app):
                           "proof": [{"file": "app/store.py", "pattern": "def get"}]})
     bad = board.check(spec, app)
     assert len(bad) == 1 and "own part" in bad[0]
+
+
+def test_collapse_keeps_the_boxes_and_merges_arrows_per_pair():
+    d = {"name": "x", "nodes": [{"id": "a", "name": "A", "x": 0, "y": 0}, {"id": "b", "name": "B", "x": 400, "y": 0}],
+         "edges": [{"from": "a", "to": "b", "kind": "calls", "label": "get"},
+                   {"from": "a", "to": "b", "kind": "reads", "label": "config.json"},
+                   {"from": "b", "to": "a", "kind": "calls", "label": "notify"}]}
+    c = board.collapse(d)
+    assert c["nodes"] == d["nodes"]
+    assert [(e["from"], e["to"], e["kind"], e["label"]) for e in c["edges"]] == [
+        ("a", "b", "calls", "get · config.json"), ("b", "a", "calls", "notify")]

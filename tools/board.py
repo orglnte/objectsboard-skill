@@ -3,6 +3,7 @@
 
     board.py check    SPEC [--root DIR]
     board.py build    SPEC [--root DIR] [--keep CURRENT.json] [--stamp REV] --out DOC.json
+    board.py collapse DOC  --out COLLAPSED.json
     board.py simplify DOC  --out SIMPLE.json
 
 SPEC is the diagram to draw, with the evidence for every arrow:
@@ -23,6 +24,10 @@ build   check, then lay out: a node already in --keep (the diagram as the
         with, without overlapping. --stamp appends "(REV)" to the name.
         DOC.json holds {name, nodes, edges}, ready for `ArtifactData update`
         pinned to the version that was read.
+collapse  the same boxes, one arrow per pair of boxes: every arrow between
+        the same two boxes becomes one, labels merged (three, then "(+n)"),
+        the strongest kind kept. The detailed diagram has one arrow per call
+        or file access; the collapsed one shows who depends on whom.
 simplify  one box per top-level owner, one arrow per pair: labels merged
         (three, then "(+n)"), the strongest kind kept (writes > spawns >
         calls > reads), arrows between a box and its own parts dropped.
@@ -193,6 +198,29 @@ def build(spec, keep, stamp):
 
 # --- simplify -------------------------------------------------------------------
 
+def merge(edges, key, prefix):
+    merged = {}
+    for e in edges:
+        a, b = key(e["from"]), key(e["to"])
+        if a == b:
+            continue
+        v = merged.setdefault((a, b), {"kinds": [], "labels": []})
+        v["kinds"].append(e["kind"])
+        for part in (x.strip() for x in (e.get("label") or "").split(" · ")):
+            if part and part not in v["labels"]:
+                v["labels"].append(part)
+    out = []
+    for i, ((a, b), v) in enumerate(merged.items()):
+        lab = " · ".join(v["labels"][:3]) + (f"  (+{len(v['labels']) - 3})" if len(v["labels"]) > 3 else "")
+        out.append({"id": f"{prefix}{i + 1}", "from": a, "to": b,
+                    "kind": next(k for k in KIND_RANK if k in v["kinds"]), "label": lab})
+    return out
+
+
+def collapse(d):
+    return {"name": d["name"] + " — collapsed", "nodes": d["nodes"], "edges": merge(d["edges"], lambda i: i, "c")}
+
+
 def simplify(d):
     N = {n["id"]: n for n in d["nodes"]}
 
@@ -214,26 +242,13 @@ def simplify(d):
             s["collapsed"] = True
             s["note"] = f"{len(kids)} inside: " + ", ".join(k["name"] for k in kids if k.get("parent") == n["id"])
         out["nodes"].append(s)
-    merged = {}
-    for e in d["edges"]:
-        a, b = top(e["from"]), top(e["to"])
-        if a == b:
-            continue
-        v = merged.setdefault((a, b), {"kinds": [], "labels": []})
-        v["kinds"].append(e["kind"])
-        for part in (x.strip() for x in (e.get("label") or "").split(" · ")):
-            if part and part not in v["labels"]:
-                v["labels"].append(part)
-    for i, ((a, b), v) in enumerate(merged.items()):
-        lab = " · ".join(v["labels"][:3]) + (f"  (+{len(v['labels']) - 3})" if len(v["labels"]) > 3 else "")
-        out["edges"].append({"id": f"s{i + 1}", "from": a, "to": b,
-                             "kind": next(k for k in KIND_RANK if k in v["kinds"]), "label": lab})
+    out["edges"] = merge(d["edges"], top, "s")
     return out
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["check", "build", "simplify"])
+    ap.add_argument("cmd", choices=["check", "build", "collapse", "simplify"])
     ap.add_argument("src")
     ap.add_argument("--root", default=".")
     ap.add_argument("--keep")
@@ -241,8 +256,9 @@ def main():
     ap.add_argument("--out")
     a = ap.parse_args()
     doc = json.load(open(a.src))
-    if a.cmd == "simplify":
-        json.dump(simplify(doc.get("data", doc)), open(a.out, "w"), indent=1)
+    if a.cmd in ("collapse", "simplify"):
+        fn = collapse if a.cmd == "collapse" else simplify
+        json.dump(fn(doc.get("data", doc)), open(a.out, "w"), indent=1)
         return 0
     bad = check(doc, pathlib.Path(a.root))
     for b in bad:

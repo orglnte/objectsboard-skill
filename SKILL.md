@@ -69,8 +69,12 @@ Without a map, start from the object the user's question is about.
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions), seed the result, and
    let the user duplicate and drag it into the target encapsulation. No
-   arrows from a container to its own parts: nesting is the ownership. Read
-   their diagram back before proposing code.
+   arrows from a container to its own parts: nesting is the ownership. Offer
+   both arrow styles and let the user pick: **detailed**, one arrow per call
+   or file access, labelled with it; **collapsed** (`board.py collapse`),
+   one arrow per pair of boxes with the labels merged, to see who depends on
+   whom. For a whole codebase, start collapsed. Read their diagram back
+   before proposing code.
 8. Refactor toward the target one owner at a time, suites green per commit,
    and redraw the board after each step.
 

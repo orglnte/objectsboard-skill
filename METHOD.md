@@ -96,7 +96,8 @@ decided.
    regex) does not match; `build` lays the diagram out, keeping the
    positions of every box the board already has and placing new ones next
    to their main neighbour without overlap, and stamps the revision;
-   `simplify` makes the simplified view. `check` also refuses an arrow
+   `collapse` merges the arrows per pair of boxes; `simplify` makes the
+   simplified view. `check` also refuses an arrow
    between a box and a box nested in it.
 5. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
    Sections: the pseudo-code class; summary counts; findings; ways in; one
@@ -188,10 +189,15 @@ cannot see is not evidence that nothing is there.
 2. **Composed object box:** the public interface inside the object in three
    boxes by how many production files outside its package use each member
    (≥3, 1–2, none), each member suffixed `·N`.
-3. **Simplified:** one box per top-level owner, one arrow per pair with
+3. **Detailed or collapsed arrows.** Any of these views can carry one
+   arrow per call or file access (detailed: what exactly crosses the
+   boundary) or one arrow per pair of boxes with the labels merged
+   (collapsed, `board.py collapse`: who depends on whom). Offer both; a
+   whole-codebase board starts collapsed, a single object's board detailed.
+4. **Simplified:** one box per top-level owner, one arrow per pair with
    the labels merged (three, then `(+n)`). An arrow into the object's files
    that does not start at the object is a bypass.
-4. **Interface:** the object's box lists its constructor and its 10–20 most
+5. **Interface:** the object's box lists its constructor and its 10–20 most
    used public members with their file counts, and a note saying so; each
    caller's box lists exactly the members it uses; each arrow reads
    `calls N members`. Callers nested by owner show which owner needs which

@@ -61,6 +61,10 @@ run plus the source):
       run time.
 5. **Never:** one box around everything, folder boxes, or the module import
    graph as the whole-codebase board.
+6. **Moves:** an external module whose only concept-class user is one class
+   does not belong outside it. `trace_objects.py` lists these moves; carry
+   each out as a refactor (its other users then reach it through the class),
+   one move per commit with the suites green, and redraw the board.
 
 ## Input
 

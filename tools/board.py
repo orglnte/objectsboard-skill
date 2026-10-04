@@ -22,8 +22,10 @@ check   every edge's proof patterns (regexes) must match in their files,
         failure, listing each.
 build   check, then lay out: a node already in --keep (the diagram as the
         board holds it now, e.g. from `ArtifactData get`) keeps its position
-        and size; a new node goes next to the node it shares most arrows
-        with, without overlapping. --stamp appends "(REV)" to the name.
+        and size unless it now overlaps another (a neighbour grew), then it
+        moves to the nearest free spot, smallest boxes first; a new node goes
+        next to the node it shares most arrows with, without overlapping.
+        --stamp appends "(REV)" to the name.
         DOC.json holds {name, nodes, edges}, ready for `ArtifactData update`
         pinned to the version that was read.
 collapse  the same boxes, one arrow per pair of boxes: every arrow between
@@ -161,6 +163,21 @@ def check(spec, root):
 
 # --- build ----------------------------------------------------------------------
 
+def nudge(d, i, step=30, rings=40):
+    """Move i (with what it holds) to the nearest spot where it overlaps
+    nothing, searching rings of `step` px around where it is."""
+    x0, y0 = bounds(d)[i][:2]
+    for k in range(1, rings):
+        for dx, dy in ((k, 0), (0, k), (-k, 0), (0, -k), (k, k), (-k, k), (k, -k), (-k, -k)):
+            cur = bounds(d)[i]
+            move_tree(d, i, x0 + dx * step - cur[0], y0 + dy * step - cur[1])
+            if not overlaps(d, i):
+                return True
+    cur = bounds(d)[i]
+    move_tree(d, i, x0 - cur[0], y0 - cur[1])
+    return False
+
+
 def build(spec, keep, stamp):
     old = {n["id"]: n for n in (keep or {}).get("nodes", [])}
     nodes, new = [], []
@@ -220,6 +237,13 @@ def build(spec, keep, stamp):
         elif placed:
             place_near(d, i, sorted(placed)[0])
         placed.add(i)
+    # a kept box that now overlaps (a neighbour grew) moves to the nearest free
+    # spot; the largest boxes stay, the smaller ones move
+    tops = sorted((n["id"] for n in nodes if not n.get("parent") or n["parent"] not in byid),
+                  key=lambda i: bounds(d)[i][2] * bounds(d)[i][3])
+    for i in tops:
+        if overlaps(d, i):
+            nudge(d, i)
     return d
 
 

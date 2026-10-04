@@ -215,7 +215,9 @@ cannot see is not evidence that nothing is there.
    same-file helper functions into their class, value classes go inside
    their single producer, and a module goes inside a class only when the
    imports and the run agree it is that class's alone. No box around
-   everything, no folder boxes, never the module import graph.
+   everything, no folder boxes, never the module import graph. An external
+   module whose only concept-class user is one class is listed as a move
+   into that class: carry it out, then redraw.
 
 ## Pitfalls
 

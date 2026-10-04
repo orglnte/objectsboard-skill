@@ -281,3 +281,15 @@ def test_objects_representation_rules(tmp_path):
     assert N["lib/other.py"]["kind"] == "external"           # functions no class encapsulates
     assert ("lib/use.py:Report", "lib/shapes.py:Shape") in {(e["from"], e["to"]) for e in s["edges"]}
     assert not [n for n in s["nodes"] if n["kind"] == "folder"]
+    assert [m["into"] for m in s["moves"] if m["module"] == "lib/util.py"] == ["lib/use.py:Report"]
+
+
+def test_build_nudges_a_kept_box_a_grown_neighbour_now_covers():
+    spec = {"name": "g", "nodes": [{"id": "big", "name": "Big"}, {"id": "p1", "name": "Part one", "parent": "big"},
+                                   {"id": "p2", "name": "Part two", "parent": "big"}, {"id": "near", "name": "Near"}],
+            "edges": []}
+    keep = {"nodes": [{"id": "big", "x": 0, "y": 0}, {"id": "near", "x": 0, "y": 60}]}
+    d = board.build(spec, keep, None)
+    assert board.overlaps(d, "near") == [] and board.overlaps(d, "big") == []
+    pos = {n["id"]: (n["x"], n["y"]) for n in d["nodes"]}
+    assert pos["big"] == (0, 0)

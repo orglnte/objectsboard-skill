@@ -12,6 +12,10 @@ records each call from one object into another; calls inside one object are
 not recorded. Closures (decorator wrappers, lambdas) and frames outside the
 project are walked past, so a call is charged to the object that made it.
 
+--spec also lists the moves: each external module whose only concept-class
+user is one class is proposed to move into it (its other users, external
+modules, would then reach it through that class).
+
 --spec writes a board spec for board.py: one box per class that encapsulates
 a concept (--concepts: the concept map's Objects column; without it, every
 class); a helper class folds into the concept class of its file, else into
@@ -182,7 +186,10 @@ def class_facts(root):
 
 
 def importers(root):
-    """{module file: {files that import it}} for the modules under root."""
+    """{module file: {(file, enclosing class or None) that uses it}} for the
+    modules under root: an import, or a string naming it (`python -m pkg.mod`,
+    its file path), which is how a module run as a separate process is
+    reached."""
     files = {p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts}
 
     def dotted(p):
@@ -198,6 +205,10 @@ def importers(root):
             continue
         here = dotted(p)
         pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
+        owner_of = {}
+        for c in [x for x in ast.walk(t) if isinstance(x, ast.ClassDef)]:
+            for x in ast.walk(c):
+                owner_of.setdefault(id(x), c.name)
         for n in ast.walk(t):
             mods = []
             if isinstance(n, ast.Import):
@@ -208,9 +219,12 @@ def importers(root):
                     up = pkg.split(".")[: len(pkg.split(".")) - (n.level - 1)]
                     base = ".".join(up + ([n.module] if n.module else []))
                 mods = [base] + [f"{base}.{a.name}" for a in n.names]
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                mods = [n.value] if n.value in by_name else []
+                mods += [m for m, f in by_name.items() if n.value == f]
             for m in mods:
                 if m in by_name and by_name[m] != str(p):
-                    out.setdefault(by_name[m], set()).add(str(p))
+                    out.setdefault(by_name[m], set()).add((str(p), owner_of.get(id(n))))
     return out
 
 
@@ -222,9 +236,10 @@ def spec_of(objs, edges, root, concepts=None):
     module's functions fold into the concept class of their file when that
     class is their only caller at run time. A value class goes inside the one
     box whose code constructs it. Another module is drawn inside a concept
-    class when that class is its only caller both statically (only the
-    class's file imports it) and at run time; otherwise it is an external
-    box. One arrow per pair of boxes."""
+    class when every file that uses it (imports it, or launches it as a
+    process) belongs to that class, counted through what the class already
+    owns, and the run shows no other caller (none at all is noted as
+    untested); otherwise it is an external box. One arrow per pair."""
     facts = class_facts(root)
     cls = {oid for oid, o in objs.items() if o["kind"] == "class"}
     keep = concept_classes(concepts, objs) if concepts else set(cls)
@@ -271,19 +286,41 @@ def spec_of(objs, edges, root, concepts=None):
             continue
         pairs.setdefault((a, b), set()).update(e["members"])
     imp = importers(root)
-    modules = {x for pair in pairs for x in pair if x not in keep}
     callers = {}
     for (a, b) in pairs:
-        if b in modules:
-            callers.setdefault(b, set()).add(a)
+        callers.setdefault(b, set()).add(a)
+    mod_ids = {oid for oid, o in objs.items() if o["kind"] == "module" and box.get(oid) == oid}
     inside = {}
-    for m, c in callers.items():
-        owner = next(iter(c)) if len(c) == 1 else None
-        if owner in keep and imp.get(objs.get(m, {"file": m})["file"], set()) <= {objs[owner]["file"]}:
-            inside[m] = owner
+
+    def up(b):
+        while b in inside:
+            b = inside[b]
+        return b
+
+    def box_of_use(use):
+        """The box a use belongs to: the class whose code contains it (its
+        box), else the box the file's module code is drawn in, followed
+        through ownership."""
+        f, cname = use
+        b = box.get(f"{f}:{cname}") if cname else None
+        b = b or box.get(f, f)
+        while b in inside:
+            b = inside[b]
+        return b
+
+    for _ in range(3):                        # ownership through owned modules settles in a few passes
+        for m in sorted(mod_ids):
+            users = {box_of_use(u) for u in imp.get(objs[m]["file"], set())}
+            run = {up(c) for c in callers.get(m, set())}
+            owner = next(iter(users)) if len(users) == 1 else None
+            if owner in keep and run <= {owner}:
+                inside[m] = owner
+            else:
+                inside.pop(m, None)
+    untested = {m for m in inside if m in mod_ids and not callers.get(m)}
     for v, owner in value_in.items():
         inside[v] = owner
-    nodes, used = [], {x for pair in pairs for x in pair}
+    nodes, used = [], {x for pair in pairs for x in pair} | set(inside)
     for oid in sorted(used):
         o = objs.get(oid, {"name": Path(oid).stem, "file": oid, "kind": "module"})
         f = Path(o["file"])
@@ -296,7 +333,8 @@ def spec_of(objs, edges, root, concepts=None):
         else:
             label = (str(f.parent) + "/") if f.name == "__init__.py" else f.name
             nodes.append({"id": oid, "name": label, "kind": "module" if oid in inside else "external",
-                          "parent": inside.get(oid), "note": o["file"]})
+                          "parent": inside.get(oid),
+                          "note": o["file"] + ("  (untested at run time)" if oid in untested else "")})
     parent = {n["id"]: n["parent"] for n in nodes}
 
     def nested(a, b):
@@ -325,7 +363,22 @@ def spec_of(objs, edges, root, concepts=None):
                  else {"observed": "called at run time through a subclass, a callback or an injected function"})
         E.append({"from": a, "to": b, "kind": "calls", "label": label + ("" if named else "  [run time only]"),
                   "proof": [proof]})
-    return {"name": f"{root} — objects", "nodes": nodes, "edges": E}
+    # moves: an external module whose only concept-class user is one class
+    # (its other users are external modules, or none) belongs in that class
+    moves = []
+    for oid in sorted(n["id"] for n in nodes if n["kind"] == "external"):
+        users = ({box_of_use(u) for u in imp.get(objs.get(oid, {"file": oid})["file"], set())}
+                 | {up(c) for c in callers.get(oid, set())})
+        users.discard(oid)
+        concept_users = users & keep
+        if len(concept_users) == 1:
+            owner = next(iter(concept_users))
+            others = sorted(users - {owner})
+            moves.append({"module": oid, "into": owner, "other_users": others,
+                          "why": (f"{objs[owner]['name']} is its only concept-class user"
+                                  + (f"; {len(others)} external module(s) also use it and would reach it through "
+                                     f"{objs[owner]['name']}" if others else ""))})
+    return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": moves}
 
 
 def main():
@@ -349,7 +402,10 @@ def main():
     json.dump({"root": a.root, "pytest_exit": int(rc), "objects": objs, "edges": edges},
               open(a.out, "w"), indent=1)
     if a.spec:
-        json.dump(spec_of(objs, edges, a.root, a.concepts), open(a.spec, "w"), indent=1)
+        spec = spec_of(objs, edges, a.root, a.concepts)
+        json.dump(spec, open(a.spec, "w"), indent=1)
+        for m in spec["moves"]:
+            print(f"move {m['module']} into {m['into']}: {m['why']}", file=sys.stderr)
     print(f"{len({e['from'] for e in edges} | {e['to'] for e in edges})} objects, {len(edges)} object pairs; "
           f"pytest exit {rc}", file=sys.stderr)
     return 0

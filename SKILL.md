@@ -145,7 +145,8 @@ Without a map, start from the object the user's question is about.
    of that repo inside it; another repo gets its own board. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions; a first draw or a redraw uses
-   `--layout`, laid out for the fewest crossing arrows), seed the result, and
+   `--layout`, laid out for the fewest arrows over a box, then crossings),
+   seed the result, and
    let the user duplicate it and drag the next change into it. No
    arrows from a container to its own parts: nesting is the ownership. Offer
    both arrow styles and let the user pick: **detailed**, one arrow per call

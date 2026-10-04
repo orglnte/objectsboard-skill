@@ -31,11 +31,11 @@ build   check, then lay out: a node already in --keep (the diagram as the
         DOC.json holds {name, nodes, edges}, ready for `ArtifactData update`
         pinned to the version that was read.
 --layout  ignore any kept positions and lay the diagram out from scratch,
-        for the fewest crossing arrows: each box's parts are laid out first,
-        then each level as one graph of fixed-size blocks, by Graphviz `dot`
-        when it is installed (both directions tried, the better kept), else
-        in a grid in connection order; then sibling blocks swap places
-        wherever that lowers the count. Deterministic: the same spec gives
+        for the fewest arrows over a box, then the fewest crossing arrows:
+        each box's parts are laid out first, then each level as one graph
+        of fixed-size blocks, by Graphviz `dot` when it is installed (both
+        directions tried, the better kept), else in a grid in connection
+        order; then sibling blocks swap places wherever that lowers them. Deterministic: the same spec gives
         the same layout.
 crossings  the layout's clutter, as the page draws it (straight arrows
         between box centres, clipped at the borders): pairs of arrows that
@@ -272,7 +272,7 @@ def build(spec, keep, stamp, fresh=False):
     return d
 
 
-# --- layout: fewest crossing arrows ---------------------------------------------
+# --- layout: fewest arrows over a box, then fewest crossings ---------------------------------------------
 
 def _clip(b, tx, ty):
     cx, cy = b[0] + b[2] / 2, b[1] + b[3] / 2
@@ -341,6 +341,13 @@ def crossings(d):
     return x, over
 
 
+def clutter(d):
+    """What a layout minimises, in order: arrows over a box, then pairs of
+    arrows that cross."""
+    x, over = crossings(d)
+    return over, x
+
+
 def _dot(ids, size, edges, rankdir):
     """{id: (x, y)} top-left positions from Graphviz dot, or None."""
     exe = shutil.which("dot")
@@ -406,11 +413,11 @@ def _level_score(ids, size, pos, edges):
     segs = _segments(d, B)
     x = sum(1 for k, s in enumerate(segs) for t in segs[k + 1:]
             if not ({s[0], s[1]} & {t[0], t[1]}) and _cross(s[2], s[3], t[2], t[3]))
-    return x + sum(1 for s in segs for j, r in B.items() if j not in (s[0], s[1]) and _hits(s[2], s[3], r))
+    return sum(1 for s in segs for j, r in B.items() if j not in (s[0], s[1]) and _hits(s[2], s[3], r)), x
 
 
 def layout(d):
-    """Lay d out from scratch for the fewest crossings; returns d."""
+    """Lay d out from scratch for the least clutter; returns d."""
     N = {n["id"]: n for n in d["nodes"]}
     kids = {}
     for n in d["nodes"]:
@@ -483,8 +490,9 @@ def layout(d):
 def refine(d, kids):
     """On the whole board, where arrows leaving a box count too: mirror each
     box's inside, and swap two sibling boxes, whenever that lowers the
-    crossings plus the arrows over a box. Fixed order, so deterministic."""
-    score = sum(crossings(d))
+    clutter (arrows over a box first, then crossings). Fixed order, so
+    deterministic."""
+    score = clutter(d)
 
     def siblings_clear(ids):
         return not any(overlaps(d, i) for i in ids)
@@ -506,7 +514,7 @@ def refine(d, kids):
                              (y0 + y1 - 2 * B[i][1] - B[i][3]) if axis == "y" else 0) for i in ids}
                 for i, (dx, dy) in moves.items():
                     move_tree(d, i, dx, dy)
-                s2 = sum(crossings(d))
+                s2 = clutter(d)
                 if s2 < score:
                     score, better = s2, True
                 else:
@@ -518,7 +526,7 @@ def refine(d, kids):
                     da = (B[b][0] - B[a][0], B[b][1] - B[a][1])
                     move_tree(d, a, *da)
                     move_tree(d, b, -da[0], -da[1])
-                    s2 = sum(crossings(d)) if siblings_clear((a, b)) else score
+                    s2 = clutter(d) if siblings_clear((a, b)) else score
                     if s2 < score:
                         score, better = s2, True
                     else:

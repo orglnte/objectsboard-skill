@@ -458,7 +458,7 @@ def test_layout_is_deterministic_clear_of_overlaps_and_keeps_parts_inside(monkey
         assert B["e"][0] < B[p][0] and B[p][0] + B[p][2] < B["e"][0] + B["e"][2]
         assert B["e"][1] < B[p][1] and B[p][1] + B[p][3] < B["e"][1] + B["e"][3]
     stacked = board.build(_square_spec(), None, None)   # the default placement, for comparison
-    assert sum(board.crossings(d1)) <= sum(board.crossings(stacked))
+    assert board.clutter(d1) <= board.clutter(stacked)
 
 
 OVERLAY_MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"

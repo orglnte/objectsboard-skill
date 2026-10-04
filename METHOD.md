@@ -144,9 +144,10 @@ decided.
    positions of every box the board already has and placing new ones next
    to their main neighbour without overlap, and stamps the revision;
    `build --layout` ignores kept positions and lays the diagram out for the
-   fewest crossing arrows (each box's parts first, each level by Graphviz
+   fewest arrows over a box, then the fewest crossing arrows (each box's
+   parts first, each level by Graphviz
    `dot` when installed, else a grid; then boxes mirrored and swapped on
-   the whole board while the count drops; deterministic); `crossings`
+   the whole board while they drop; deterministic); `crossings`
    counts the arrows that cross and the arrows over a box;
    `collapse` merges the arrows per pair of boxes; `simplify` makes the
    simplified view. `check` also refuses an arrow
@@ -234,8 +235,8 @@ cannot see is not evidence that nothing is there.
    overlaps; keep the user's position for every box that survives. When the
    structure changed (boxes moved to another owner), redraw from scratch
    (`board.py build --layout`): kept positions then put boxes over their
-   new owners' titles. The fewest crossings cannot be guaranteed (finding
-   them is NP-hard); `crossings` gives the number to compare layouts by.
+   new owners' titles. The fewest cannot be guaranteed (finding them is
+   NP-hard); `crossings` gives the number to compare layouts by.
 6. **No arrows between an object and its own parts.** Nesting already
    states ownership; the arrows that matter cross the boundary.
 

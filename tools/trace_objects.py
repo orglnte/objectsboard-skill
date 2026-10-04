@@ -258,11 +258,18 @@ def declared(map_file, keep, objs, root):
         for n, ext in names:
             if n.split(".")[0] in cls_by_name:
                 continue
+            if not ext and not owners:
+                continue                      # a row naming no class assigns nothing
             for f in match(n):
                 votes.setdefault(f, set()).add(None if ext else (next(iter(owners)) if len(owners) == 1 else "?"))
+    conflicts = {}
     for f, v in votes.items():
         if len(v) == 1 and "?" not in v:
             out[f] = next(iter(v))            # every row naming it agrees
+        else:
+            conflicts[f] = sorted(objs[x]["name"] if x in objs else ("external" if x is None else "a row naming several classes")
+                                  for x in v)
+    declared.conflicts = conflicts
     return out
 
 
@@ -322,6 +329,18 @@ def spec_of(objs, edges, root, concepts=None):
             if c:
                 return c, 3
         return None, 5
+
+    def structural_owner(f):
+        c = primary_of_file(f)
+        if c:
+            return c
+        for d in Path(f).parents:
+            if d == rootp or rootp not in d.parents:
+                break
+            c = primary_of_dir(d)
+            if c:
+                return c
+        return None
 
     # every traced object -> the box it is drawn in, and that box's owner
     box, parent = {}, {}
@@ -444,6 +463,25 @@ def spec_of(objs, edges, root, concepts=None):
             p = Path(n["id"])
             if any(primary_of_dir(d) for d in p.parents if d != rootp and rootp in d.parents):
                 n["flag"] = f"misplaced: in {p.parent}/ but no class owns it"
+    conflicts = getattr(declared, "conflicts", {}) if concepts else {}
+    for n in nodes:
+        f = n["note"].split("  ")[0] if n["id"] not in objs or objs[n["id"]]["kind"] == "module" else None
+        if not f:
+            continue
+        doubts = []
+        if f in conflicts:
+            doubts.append("the concept map's rows disagree: " + ", ".join(conflicts[f]))
+        if f in decl and decl[f] is not None:
+            s_own = structural_owner(f)
+            if s_own and s_own != decl[f]:
+                doubts.append(f"the map says {objs[decl[f]]['name']}, its folder says {objs[s_own]['name']}")
+        if n["id"] in parent:
+            owner = top(n["id"])
+            users = {top(box.get(e["from"], e["from"])) for e in edges if box.get(e["to"]) == n["id"]}
+            if users and owner not in users and len(users & keep) == 1:
+                doubts.append(f"{objs[owner]['name']} never uses it; only {objs[next(iter(users & keep))]['name']} does")
+        if doubts:
+            n["flag"] = "doubt: " + "; ".join(doubts) + (" — " + n["flag"] if n.get("flag") else "")
     for e in E:
         b = e["to"]
         if b in parent and not within(top(b), e["from"]):

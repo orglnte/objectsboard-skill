@@ -184,7 +184,10 @@ cannot see is not evidence that nothing is there.
    gone; label a target design as a target, never mix it into a
    current-state diagram.
 5. **Place a new box next to the box it connects to most**, without
-   overlaps; keep the user's position for every box that survives.
+   overlaps; keep the user's position for every box that survives. When the
+   structure changed (boxes moved to another owner), redraw from scratch
+   (`board.py build` without `--keep`): kept positions then put boxes over
+   their new owners' titles.
 6. **No arrows between an object and its own parts.** Nesting already
    states ownership; the arrows that matter cross the boundary.
 
@@ -214,8 +217,10 @@ cannot see is not evidence that nothing is there.
    consistent declarations, then the file's concept class, then the
    package's (named after its folder, never the root), composition and
    subclassing between classes; usage never moves a box. Usage flags, in the
-   warning colour, the arrows that bypass an owner's interface and the
-   misplaced modules; those arrows are the refactoring worklist. No box
+   warning colour, the arrows that bypass an owner's interface, the
+   misplaced modules and the doubts (map and folder disagree, the map's rows
+   disagree, or the owner never uses its module); the bypass arrows are the
+   refactoring worklist, the doubts are settled in the concept map. No box
    around everything, no folder boxes, never the module import graph.
 
 ## Pitfalls

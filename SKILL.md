@@ -69,7 +69,12 @@ as external boxes.
    commit, suites green, then redraw.
 2. **Flagged boxes:** a part called directly from outside its owner, and a
    misplaced module (in an owner's folder, but owned by no class).
-3. Never draw one box around everything, folder boxes, or the module import
+3. **Doubts, flagged in place (no extra box):** the concept map and the
+   folder name different owners, the map's rows disagree, or the owner never
+   uses a module that exactly one other class uses. The box stays where the
+   rules put it; its flag names the competing owners. The user settles each
+   doubt in the concept map.
+4. Never draw one box around everything, folder boxes, or the module import
    graph as the whole-codebase board.
 
 ## Input

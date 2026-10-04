@@ -697,6 +697,21 @@ def spec_of(objs, edges, root, concepts=None):
 
     reexported = reexports(root, objs, owner_of_file, primary_of_dir)
 
+    reached_cache = {}
+
+    def names_reached(f):
+        """The names f's code reaches on an object or imports (`x.queued`,
+        `from m import queued`); a bare name is a parameter or a local, so a
+        call through it is a function the caller was handed."""
+        if f not in reached_cache:
+            try:
+                t = ast.parse(Path(f).read_text(errors="replace"))
+            except (OSError, SyntaxError):
+                t = ast.Module(body=[], type_ignores=[])
+            reached_cache[f] = {n.attr for n in ast.walk(t) if isinstance(n, ast.Attribute)} | \
+                {a.asname or a.name for n in ast.walk(t) if isinstance(n, ast.ImportFrom) for a in n.names}
+        return reached_cache[f]
+
     def text_of(f):
         try:
             return Path(f).read_text(errors="replace")
@@ -714,8 +729,8 @@ def spec_of(objs, edges, root, concepts=None):
         owner = top(box.get(e["to"], e["to"]))
         if all(m in reexported.get((tfile, owner), ()) for m in e["members"]):
             return True
-        text = text_of(objs.get(e["from"], {"file": e["from"]})["file"])
-        return not any(re.search(r"\b" + re.escape(m) + r"\b", text) for m in e["members"] if not m.startswith("__"))
+        reached = names_reached(objs.get(e["from"], {"file": e["from"]})["file"])
+        return not any(m in reached for m in e["members"] if not m.startswith("__"))
 
     red, open_pairs = {}, set()
     for e in edges:

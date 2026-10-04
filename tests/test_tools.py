@@ -593,6 +593,7 @@ SHOP = {
                     "        return [s.total() for s in shop.sales()] + [ledger.reset(), count()]\n"),
     "lib/back.py": "from lib.shop._stock import count\n\n\ndef peek(shop):\n    return count(), shop._audit()\n",
     "lib/hook.py": "def fire(f):\n    return f()\n",
+    "lib/judge.py": "def rule(count):\n    return count()\n",
 }
 
 
@@ -603,7 +604,9 @@ def test_edge_colours_private_red_owner_bypass_amber_interface_blue(tmp_path):
              {"from": "lib/till.py:Till", "to": "lib/shop/_stock.py", "members": ["count"]},
              {"from": "lib/back.py", "to": "lib/shop/_stock.py", "members": ["count"]},
              {"from": "lib/back.py", "to": "lib/shop/shop.py:Shop", "members": ["_audit"]},
-             {"from": "lib/hook.py", "to": "lib/shop/shop.py:Shop", "members": ["_audit"]}]
+             {"from": "lib/hook.py", "to": "lib/shop/shop.py:Shop", "members": ["_audit"]},
+             {"from": "lib/judge.py", "to": "lib/shop/ledger.py", "members": ["reset"]},
+             {"from": "lib/judge.py", "to": "lib/shop/_stock.py", "members": ["count"]}]
     c = _colours(_spec(tmp_path, SHOP, edges))
     assert c[("lib/till.py:Till", "lib/shop/shop.py:Shop")] == "blue"    # its public method, and the Sales it hands out
     assert c[("lib/till.py:Till", "lib/shop/ledger.py")] == "amber"     # ledger.reset: public, but Shop does not hand it out
@@ -611,6 +614,8 @@ def test_edge_colours_private_red_owner_bypass_amber_interface_blue(tmp_path):
     assert c[("lib/back.py", "lib/shop/_stock.py")] == "red"            # imported through the private module
     assert c[("lib/back.py", "lib/shop/shop.py:Shop")] == "red"         # a private method, named in its code
     assert c.get(("lib/hook.py", "lib/shop/shop.py:Shop"), "blue") == "blue"   # handed a private method as a callback
+    assert ("lib/judge.py", "lib/shop/ledger.py") not in c              # called through a parameter: handed to it
+    assert ("lib/judge.py", "lib/shop/_stock.py") not in c              # even when the parameter has the function's name
 
 
 def test_a_private_name_is_open_to_its_module_subclasses_and_package(tmp_path):

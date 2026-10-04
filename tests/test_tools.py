@@ -554,5 +554,82 @@ def test_a_part_its_owner_exposes_is_reached_through_the_owner_not_around_it(tmp
     N = {n["id"]: n for n in s["nodes"]}
     assert {N[i]["parent"] for i in ("lib/house/door.py:Door", "lib/house/safe.py:Safe", "lib/house/window.py:Window")} \
         == {"lib/house/house.py:House"}
-    red = {e["to"].split(":")[-1] for e in s["edges"] if e.get("flag")}
-    assert red == {"Safe"}            # the door and the window are public; the safe is not
+    flags = {e["to"].split(":")[-1]: e.get("flag", "") for e in s["edges"] if e["from"] == "lib/guest.py"}
+    assert flags["Safe"].startswith("private: reaches _safe of House")   # through a private attribute: red
+    assert "Door" not in flags and "Window" not in flags                  # through the public ones: the House arrow
+
+
+def _spec(tmp_path, files, edges):
+    import trace_objects
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        return trace_objects.spec_of(objs, edges, "lib")
+    finally:
+        os.chdir(cwd)
+
+
+def _colours(s):
+    return {(e["from"], e["to"]): ("red" if e.get("flag", "").startswith("private:") else
+                                   "amber" if e.get("flag") else "blue") for e in s["edges"]}
+
+
+SHOP = {
+    "lib/__init__.py": "",
+    "lib/shop/__init__.py": "from lib.shop._stock import count\n",
+    "lib/shop/shop.py": ("from lib.shop import ledger\n\n\nclass Shop:\n    def sales(self):\n"
+                         "        return ledger.sales()\n\n    def _audit(self):\n        return 0\n"),
+    "lib/shop/ledger.py": ("from dataclasses import dataclass\n\n\n@dataclass\nclass Sale:\n    n: int\n\n"
+                           "    def total(self):\n        return self.n\n\n\ndef sales():\n    out = []\n"
+                           "    out.append(Sale(1))\n    return out\n\n\ndef reset():\n    return 0\n"),
+    "lib/shop/_stock.py": "def count():\n    return 3\n",
+    "lib/shop/clerk.py": "from lib.shop._stock import count\n\n\ndef tally():\n    return count()\n",
+    "lib/till.py": ("from lib.shop import ledger, count\n\n\nclass Till:\n    def close(self, shop):\n"
+                    "        return [s.total() for s in shop.sales()] + [ledger.reset(), count()]\n"),
+    "lib/back.py": "from lib.shop._stock import count\n\n\ndef peek(shop):\n    return count(), shop._audit()\n",
+    "lib/hook.py": "def fire(f):\n    return f()\n",
+}
+
+
+def test_edge_colours_private_red_owner_bypass_amber_interface_blue(tmp_path):
+    edges = [{"from": "lib/till.py:Till", "to": "lib/shop/shop.py:Shop", "members": ["sales"]},
+             {"from": "lib/till.py:Till", "to": "lib/shop/ledger.py:Sale", "members": ["total"]},
+             {"from": "lib/till.py:Till", "to": "lib/shop/ledger.py", "members": ["reset"]},
+             {"from": "lib/till.py:Till", "to": "lib/shop/_stock.py", "members": ["count"]},
+             {"from": "lib/back.py", "to": "lib/shop/_stock.py", "members": ["count"]},
+             {"from": "lib/back.py", "to": "lib/shop/shop.py:Shop", "members": ["_audit"]},
+             {"from": "lib/hook.py", "to": "lib/shop/shop.py:Shop", "members": ["_audit"]}]
+    c = _colours(_spec(tmp_path, SHOP, edges))
+    assert c[("lib/till.py:Till", "lib/shop/shop.py:Shop")] == "blue"    # its public method, and the Sales it hands out
+    assert c[("lib/till.py:Till", "lib/shop/ledger.py")] == "amber"     # ledger.reset: public, but Shop does not hand it out
+    assert c[("lib/till.py:Till", "lib/shop/_stock.py")] == "amber"     # re-exported by the package: public, not Shop's
+    assert c[("lib/back.py", "lib/shop/_stock.py")] == "red"            # imported through the private module
+    assert c[("lib/back.py", "lib/shop/shop.py:Shop")] == "red"         # a private method, named in its code
+    assert c.get(("lib/hook.py", "lib/shop/shop.py:Shop"), "blue") == "blue"   # handed a private method as a callback
+
+
+def test_a_private_name_is_open_to_its_module_subclasses_and_package(tmp_path):
+    files = {
+        "lib/__init__.py": "",
+        "lib/base.py": "class Base:\n    def run(self):\n        return self._step()\n\n    def _step(self):\n        return 1\n",
+        "lib/sub.py": ("from lib.base import Base\n\n\nclass Sub(Base):\n    def twin(self, other):\n"
+                       "        return other._step()\n"),
+        "lib/stranger.py": "def poke(b):\n    return b._step()\n",
+        "lib/pkg/__init__.py": "",
+        "lib/pkg/_impl.py": "def go():\n    return 1\n",
+        "lib/pkg/front.py": "from lib.pkg._impl import go\n\n\ndef call():\n    return go()\n",
+    }
+    edges = [{"from": "lib/stranger.py", "to": "lib/base.py:Base", "members": ["_step"]},
+             {"from": "lib/pkg/front.py", "to": "lib/pkg/_impl.py", "members": ["go"]}]
+    s = _spec(tmp_path, files, edges)
+    c = _colours(s)
+    assert c[("lib/stranger.py", "lib/base.py:Base")] == "red"
+    assert all(col != "red" for (a, _b), col in c.items() if a in ("lib/sub.py:Sub", "lib/pkg/front.py"))
+    import trace_objects
+    w = trace_objects.worklist(s)
+    assert [g["kind"] for g in w][:1] == ["private"]

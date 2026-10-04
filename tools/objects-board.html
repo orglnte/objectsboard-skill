@@ -10,7 +10,7 @@
     --k-file: #7c5a12; --k-file-fill: #faf3e2; --k-process: #6a4fa3; --k-process-fill: #f1edf9;
     --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6;
     --e-calls: #2563a6; --e-reads: #2f8a57; --e-writes: #c2410c; --e-spawns: #6a4fa3;
-    --exp: #b45309; --warn: #d4261c;
+    --exp: #b45309; --warn: #d4261c; --amber: #b7791f;
     --sans: "Fira Sans", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
     --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
@@ -21,7 +21,7 @@
       --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
       --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
       --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
-      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e;
+      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d;
       color-scheme: dark;
     }
   }
@@ -31,7 +31,7 @@
     --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
     --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
     --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
-    --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e;
+    --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -95,6 +95,11 @@
   .node text.flag { fill: var(--warn); font-family: var(--sans); font-size: 11px; font-weight: 600; }
   .edge.flagged path:not(.hit) { stroke: var(--warn) !important; stroke-width: 2; }
   .edge.flagged text { fill: var(--warn); }
+  .node.flagged.amber rect.box { stroke: var(--amber) !important; }
+  .node.amber text.flag { fill: var(--amber); }
+  .edge.flagged.amber path:not(.hit) { stroke: var(--amber) !important; }
+  .edge.flagged.amber text { fill: var(--amber); }
+  .flagnote.amber { color: var(--amber); }
   .flagnote { color: var(--warn); font-weight: 600; }
   .node .rz { fill: var(--ink-3); opacity: 0; cursor: nwse-resize; }
   .node .rz.shown { opacity: .45; }
@@ -146,6 +151,9 @@
 
 <script>
 const KINDS = ["object", "module", "process", "file", "folder", "external"];
+// a private name reached from outside its container is red; a part reached
+// around its owner, data with several writers and a doubt about an owner are amber
+const sev = f => !f ? "" : /^private:|— private:/.test(f) ? "" : /^(owner bypass|shared|doubt)|— (owner bypass|shared)/.test(f) ? "amber" : "";
 const EKINDS = [
   { k: "calls", label: "calls", dash: "" },
   { k: "reads", label: "reads", dash: "5 4" },
@@ -224,7 +232,7 @@ function render() {
   for (const n of order) {
     const b = L[n.id], c = kindColors(n.kind), cont = children(n.id).length > 0;
     const dim = S.sel && S.edgeOnlySel === false && rel.size && !rel.has(n.id) && n.id !== S.sel && !isDesc(S.sel, n.id, B) && !isDesc(n.id, S.sel, B) && !cont;
-    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : ""].join(" ");
+    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag)].join(" ");
     const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : "";
     g += `<g class="${cls}" data-n="${esc(n.id)}" transform="translate(${b.x},${b.y})">
       <rect class="box" width="${b.w}" height="${b.h}" rx="${n.kind === "file" ? 2 : 6}" style="fill:${cont ? `var(--k-${n.kind}-fill)` : c.f};stroke:${c.s}${cont ? ";fill-opacity:.55" : ""}"${dash}></rect>`;
@@ -270,7 +278,7 @@ function render() {
     const hl = S.sel && (e.from === S.sel || e.to === S.sel);
     const dim = S.sel && !hl && !S.edgeOnlySel;
     const d = `M${p1.x},${p1.y} Q${cx},${cy} ${p2.x},${p2.y}`;
-    eg += `<g class="edge ${hl ? "hl" : ""} ${dim ? "dim" : ""} ${S.selEdge === e.id ? "sel" : ""} ${e.flag ? "flagged" : ""}" data-e="${esc(e.id)}">
+    eg += `<g class="edge ${hl ? "hl" : ""} ${dim ? "dim" : ""} ${S.selEdge === e.id ? "sel" : ""} ${e.flag ? "flagged" : ""} ${sev(e.flag)}" data-e="${esc(e.id)}">
       <path d="${d}" style="stroke:var(--e-${e.kind})" ${ek.dash ? `stroke-dasharray="${ek.dash}"` : ""} marker-end="url(#ah-${e.kind})"></path>
       <path class="hit" d="${d}"></path>
       ${S.labels && e.label && (!S.sel || hl || S.selEdge === e.id) ? `<text x="${(p1.x + 2 * cx + p2.x) / 4}" y="${(p1.y + 2 * cy + p2.y) / 4 - 3}" text-anchor="middle">${esc(e.label.length > 70 ? e.label.slice(0, 68) + "…" : e.label)}</text>` : ""}
@@ -303,7 +311,7 @@ function side() {
     if (!e) { S.selEdge = null; return side(); }
     el.innerHTML = `<h2>Arrow</h2>
       <p><b>${esc(B[e.from]?.name)}</b> → <b>${esc(B[e.to]?.name)}</b></p>
-      ${e.flag ? `<p class="flagnote">⚠ ${esc(e.flag)}</p>` : ""}
+      ${e.flag ? `<p class="flagnote ${sev(e.flag)}">⚠ ${esc(e.flag)}</p>` : ""}
       <div class="f"><label for="ekind">Kind</label><select id="ekind">${EKINDS.map(x => `<option ${x.k === e.kind ? "selected" : ""}>${x.k}</option>`).join("")}</select></div>
       <div class="f"><label for="elabel">Label: the call, or what is read or written</label><input type="text" id="elabel" value="${esc(e.label)}"></div>
       <div class="row"><button id="eswap" type="button">Reverse</button><button id="edel" type="button" class="${S.armed === "e" ? "armed" : "danger"}">${S.armed === "e" ? "Confirm delete" : "Delete arrow"}</button></div>`;
@@ -314,7 +322,7 @@ function side() {
     const parents = S.d.nodes.filter(x => x.id !== n.id && !isDesc(x.id, n.id, B)).sort((a, b) => a.name.localeCompare(b.name));
     const outs = S.d.edges.filter(e => e.from === n.id), ins = S.d.edges.filter(e => e.to === n.id);
     const li = (e, other) => `<li data-goe="${esc(e.id)}"><span class="sw" style="--c:var(--e-${e.kind});--f:transparent"></span><b>${esc(e.kind)}</b> ${esc(B[other]?.name)}${e.label ? " · " + esc(e.label) : ""}</li>`;
-    el.innerHTML = `<h2>Box</h2>${n.flag ? `<p class="flagnote">⚠ ${esc(n.flag)}</p>` : ""}
+    el.innerHTML = `<h2>Box</h2>${n.flag ? `<p class="flagnote ${sev(n.flag)}">⚠ ${esc(n.flag)}</p>` : ""}
       <div class="f"><label for="nname">Name</label><input type="text" id="nname" value="${esc(n.name)}"></div>
       <div class="row">
         <div class="f"><label for="nkind">Kind</label><select id="nkind">${KINDS.map(k => `<option ${k === n.kind ? "selected" : ""}>${k}</option>`).join("")}</select></div>

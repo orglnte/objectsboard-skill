@@ -12,14 +12,14 @@ records each call from one object into another; calls inside one object are
 not recorded. Closures (decorator wrappers, lambdas) and frames outside the
 project are walked past, so a call is charged to the object that made it.
 
---worklist FILE (with --spec) writes the bypasses as the refactoring
-worklist: one entry per part reached around its owner, the most bypassed
-first, with every arrow that reaches it and its call sites as file:line,
+--worklist FILE (with --spec) writes the refactoring worklist: private
+access (red) first, then owner bypasses and shared data (amber); one entry
+per part, the most reached first, with every arrow that reaches it and its call sites as file:line,
 read from the code (the imports naming the part, and the uses of its class
 name, of names imported from it and of the members called; data: the lines
 matching the resource's pattern). An attribute is matched by name, so a
 same-named attribute of another object can show up. Route the first entry through its owner,
-re-run, take the next.
+re-run, take the next. The colours are METHOD.md's (Arrow colours).
 
 --spec writes a board spec for board.py, the code as it is: one box per
 class with behaviour of its own, placed by the code's structure (see
@@ -129,6 +129,108 @@ def _top_calls(expr):
     return []
 
 
+def _private(name):
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
+def private_reaches(root, objs):
+    """Every reach of a private name from code under root, read from the
+    code: an attribute `x._name` (not on self, cls or super()) whose name
+    exactly one project class or module defines (a method, `self._name =`, a
+    top-level def or assignment), an import of a private name, and an import
+    through a private module or package (`pkg._impl`). Each is
+    {"file", "cls", "line", "name", "definer", "kind", "holds"}: kind
+    "class" (definer a class id; holds the classes the attribute is built
+    from), "module" (definer a module file) or "path" (definer the private
+    module's file, name its private segment)."""
+    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+    trees = []
+    for p in files:
+        try:
+            trees.append((p, ast.parse(p.read_text())))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+    by_name = {}
+    for oid, o in objs.items():
+        if o["kind"] == "class":
+            by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
+
+    def made(expr):
+        return {nm for c in ast.walk(expr) if isinstance(c, ast.Call) and (nm := _called_name(c)) in by_name}
+
+    defs = {}                                 # private name -> {(kind, definer)}
+    holds = {}
+    for p, t in trees:
+        for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
+            cid = f"{p}:{c.name}"
+            for n in ast.walk(c):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _private(n.name) and n in c.body:
+                    defs.setdefault(n.name, set()).add(("class", cid))
+                elif isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+                    for x in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                        if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "self" \
+                                and _private(x.attr):
+                            defs.setdefault(x.attr, set()).add(("class", cid))
+                            holds.setdefault((cid, x.attr), set()).update(made(n.value))
+        for n in t.body:
+            names = [n.name] if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else \
+                [x.id for x in (n.targets if isinstance(n, ast.Assign) else [n.target]) if isinstance(x, ast.Name)] \
+                if isinstance(n, (ast.Assign, ast.AnnAssign)) else []
+            for nm in names:
+                if _private(nm):
+                    defs.setdefault(nm, set()).add(("module", str(p)))
+
+    def dotted(p):
+        parts = list(p.with_suffix("").parts)
+        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+    mod_file = {dotted(p): str(p) for p in files}
+    out = []
+    for p, t in trees:
+        spans = [(c.lineno, c.end_lineno, c.name) for c in ast.walk(t) if isinstance(c, ast.ClassDef)]
+
+        def cls_at(ln):
+            inner = [c for c in spans if c[0] <= ln <= c[1]]
+            return min(inner, key=lambda c: c[1] - c[0])[2] if inner else None
+
+        here = dotted(p)
+        pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
+        for n in ast.walk(t):
+            if isinstance(n, ast.Attribute) and _private(n.attr):
+                v = n.value
+                if isinstance(v, ast.Name) and v.id in ("self", "cls") or \
+                        isinstance(v, ast.Call) and _called_name(v) == "super":
+                    continue
+                d = defs.get(n.attr, set())
+                if len(d) == 1:
+                    kind, definer = next(iter(d))
+                    out.append({"file": str(p), "cls": cls_at(n.lineno), "line": n.lineno, "name": n.attr,
+                                "definer": definer, "kind": kind, "holds": sorted(holds.get((definer, n.attr), ()))})
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                if isinstance(n, ast.Import):
+                    mods = [(a.name, None) for a in n.names]
+                else:
+                    base = n.module or ""
+                    if n.level:
+                        up = pkg.split(".")[: len(pkg.split(".")) - (n.level - 1)]
+                        base = ".".join(up + ([n.module] if n.module else []))
+                    mods = [(base, a.name) for a in n.names]
+                for base, name in mods:
+                    full = f"{base}.{name}" if name and f"{base}.{name}" in mod_file else base
+                    segs = full.split(".")
+                    for i, seg in enumerate(segs):
+                        if _private(seg) and ".".join(segs[: i + 1]) in mod_file:
+                            out.append({"file": str(p), "cls": cls_at(n.lineno), "line": n.lineno, "name": seg,
+                                        "definer": mod_file[".".join(segs[: i + 1])], "kind": "path",
+                                        "holds": [], "container": str(Path(*segs[:i]))})
+                            break
+                    else:
+                        if name and _private(name) and base in mod_file:
+                            out.append({"file": str(p), "cls": cls_at(n.lineno), "line": n.lineno, "name": name,
+                                        "definer": mod_file[base], "kind": "module", "holds": []})
+    return out
+
+
 def owners(root, objs):
     """{class id: owner class id} for a class created and kept by exactly one
     other class (`self.x = Other(...)` in its body, also inside `a or b` and
@@ -177,12 +279,38 @@ def owners(root, objs):
     return {k: next(iter(v)) for k, v in kept.items() if len(v) == 1}
 
 
+def _handed_out(fn, built, by_name):
+    """Class names a function returns: built in a return (`built(expr)`),
+    bound to a name it returns (`x = C()`, `xs.append(C(...))`), or named
+    in its return annotation (`-> list[C]`)."""
+    bound = {}
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    bound.setdefault(t.id, set()).update(built(n.value))
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+                and n.func.attr in ("append", "add", "extend", "insert"):
+            for a in n.args:
+                bound.setdefault(n.func.value.id, set()).update(built(a))
+    out = set()
+    for r in [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]:
+        out |= built(r.value)
+        if isinstance(r.value, ast.Name):
+            out |= bound.get(r.value.id, set())
+    if fn.returns is not None:
+        out |= {x.id if isinstance(x, ast.Name) else x.attr for x in ast.walk(fn.returns)
+                if isinstance(x, (ast.Name, ast.Attribute)) and (x.id if isinstance(x, ast.Name) else x.attr) in by_name}
+    return out
+
+
 def exposed(root, objs):
-    """{(owner class id, class name)}: the classes an owner exposes, through a
-    public attribute (`self.x = Other(...)`, directly or through a project
-    factory) or a public method or property that returns one, or is named
-    after it (`def workspace` -> Workspace). What is public is the owner's
-    interface: a call into an exposed part through it goes through the owner."""
+    """{(owner class id, class name)}: the classes an owner hands out, through
+    a public attribute (`self.x = Other(...)`, directly or through a project
+    factory) or a public method or property that returns one (built in the
+    return, collected in a name it returns, or named in its annotation), or
+    is named after it (`def workspace` -> Workspace). What is public is the
+    owner's interface: a call into a part it hands out goes through the owner."""
     by_name = {}
     for oid, o in objs.items():
         if o["kind"] == "class":
@@ -196,12 +324,13 @@ def exposed(root, objs):
             trees.append((p, ast.parse(p.read_text())))
         except (SyntaxError, UnicodeDecodeError):
             continue
+    def direct(expr):
+        return {nm for c in ast.walk(expr) if isinstance(c, ast.Call) and (nm := _called_name(c)) in by_name}
+
     makes = {}
     for _, t in trees:
         for fn in [n for n in ast.walk(t) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            for r in [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]:
-                makes.setdefault(fn.name, set()).update(
-                    nm for c in _top_calls(r.value) if (nm := _called_name(c)) in by_name)
+            makes.setdefault(fn.name, set()).update(_handed_out(fn, direct, by_name))
 
     def built(expr):
         out = set()
@@ -224,8 +353,7 @@ def exposed(root, objs):
                         out |= {(owner, nm) for nm in built(n.value)}
             for f in c.body:
                 if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and not f.name.startswith("_"):
-                    for r in [n for n in ast.walk(f) if isinstance(n, ast.Return) and n.value is not None]:
-                        out |= {(owner, nm) for nm in built(r.value)}
+                    out |= {(owner, nm) for nm in _handed_out(f, built, by_name)}
                     if f.name in snake:
                         out.add((owner, snake[f.name]))
     return out
@@ -370,16 +498,18 @@ def spec_of(objs, edges, root, concepts=None):
        (`self.x = Other(...)`, or through a project factory function whose
        `return Other(...)` builds it); a subclass folds into its base.
     4. Everything else is external.
-    5. A use of an owned module or class from outside its owner is a bypass,
-       listed as a move, unless the owner exposes it (a public attribute,
-       method or property: what is public is the owner's interface). One
-       arrow per pair of boxes.
+    5. A use of an owned module or class from outside its owner is an owner
+       bypass (amber), listed as a move, unless the owner hands it out (a
+       public attribute, method or property, or an object a public method
+       returns: what is public is the owner's interface). A private name
+       reached from outside its Python container is private access (red).
+       One arrow per pair of boxes.
 
     Data (the map's resources table names it and how code reaches it): its
     owner is its only writer in the code (a write anywhere in the function
-    that reaches it); a reach from anyone else is a
-    bypass; several writers mean no single owner, and each write is flagged
-    as shared.
+    that reaches it); a reach from anyone else is an
+    owner bypass; several writers mean no single owner, and each write is
+    flagged as shared.
 
     The concept map, when given, is an overlay: each box is labelled with
     the concepts whose Objects cell names it, and a concept spread over
@@ -500,6 +630,76 @@ def spec_of(objs, edges, root, concepts=None):
             b = parent[b]
         return True
 
+    def handed(oid):
+        """A class instance its owner hands out: a class (not a box) whose
+        name a holder of its box exposes (`Shop.sales()` returning `Sale`s)."""
+        if oid not in objs or objs[oid]["kind"] != "class" or oid in keep:
+            return False
+        name, b = objs[oid]["name"].split(".")[-1], box.get(oid)
+        while b is not None:
+            if (b, name) in shown:
+                return True
+            b = parent.get(b)
+        return False
+
+    def module_box(f):
+        if f in box:
+            return box[f]
+        return next((box[k] for k in sorted(objs) if objs[k]["file"] == f and k in box), f)
+
+    def inside(f, cname, kind, definer, container=None):
+        """Is code in file f (class cname) inside the container of a private
+        name: its module, its class or a subclass of it, or the package that
+        holds a private module."""
+        if kind == "path":
+            return Path(container) in Path(f).parents
+        if kind == "module":
+            return f == definer
+        dfile, dcls = definer.split(":", 1)
+        bases = facts.get(f"{f}:{cname}", {}).get("bases", []) if cname else []
+        return f == dfile or dcls.split(".")[-1] in bases
+
+    red, open_pairs = {}, set()
+    for e in edges:
+        a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
+        if a == b:
+            continue
+        if not handed(e["to"]):
+            open_pairs.add((a, b))
+        ffile = objs.get(e["from"], {"file": e["from"]})["file"]
+        tfile = objs.get(e["to"], {"file": e["to"]})["file"]
+        priv = [m for m in e["members"] if _private(m)]
+        if not priv:
+            continue
+        try:
+            text = Path(ffile).read_text(errors="replace")
+        except OSError:
+            text = ""
+        cname = objs[e["from"]]["name"].split(".")[0] if objs.get(e["from"], {}).get("kind") == "class" else None
+        kind = "class" if objs.get(e["to"], {}).get("kind") == "class" else "module"
+        for m in priv:                        # a private name the caller's code names: not a callback it was handed
+            if re.search(r"\b" + re.escape(m) + r"\b", text) and not inside(ffile, cname, kind, e["to"] if kind == "class" else tfile):
+                r = red.setdefault((a, b), {"members": set(), "where": objs.get(e["to"], {"name": tfile})["name"]})
+                r["members"].add(m)
+    for u in private_reaches(root, objs):
+        if inside(u["file"], u["cls"], u["kind"], u["definer"], u.get("container")):
+            continue
+        a = box.get(f"{u['file']}:{u['cls']}") if u["cls"] and f"{u['file']}:{u['cls']}" in box else box.get(u["file"], u["file"])
+        if u["kind"] == "class":
+            held = [box[k] for nm in u["holds"] for k in sorted(objs) if objs[k]["kind"] == "class"
+                    and objs[k]["name"].split(".")[-1] == nm and k in box]
+            targets, where = held or [box.get(u["definer"], u["definer"])], objs[u["definer"]]["name"]
+        else:
+            targets = [module_box(u["definer"])]
+            where = Path(u["definer"]).name if u["kind"] == "module" else u["container"] + "/"
+        for b in targets:
+            if a == b:
+                continue
+            r = red.setdefault((a, b), {"members": set(), "where": where})
+            r["members"].add(u["name"])
+            pairs.setdefault((a, b), set()).add(u["name"])
+            open_pairs.add((a, b))
+
     used = {x for pair in pairs for x in pair}
     frontier = set(used)
     while frontier:
@@ -551,11 +751,9 @@ def spec_of(objs, edges, root, concepts=None):
             continue
         owner = top(b)
         users = set()
-        if b in objs:
-            users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b}
-        else:
+        users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b and not handed(e["to"])}
+        if b not in objs:
             users |= {box_of_use(u) for u in imp.get(b, set())}
-            users |= {box.get(e["from"], e["from"]) for e in edges if box.get(e["to"]) == b}
         out = sorted(u for u in users if top(u) != owner) if not is_exposed(b) else []
         if out:
             moves[b] = {"module": b, "into": owner, "other_users": out,
@@ -566,7 +764,7 @@ def spec_of(objs, edges, root, concepts=None):
     N = {n["id"]: n for n in nodes}
     for b, m in moves.items():
         if b in N:
-            N[b]["flag"] = "called directly from outside " + objs[m["into"]]["name"] + ": " + ", ".join(
+            N[b]["flag"] = "owner bypass: called directly from outside " + objs[m["into"]]["name"] + ": " + ", ".join(
                 Path(u.split(":")[0]).name + (":" + u.split(":")[1] if ":" in u else "") for u in m["other_users"])
     # resources (data): one box each, an arrow from every box whose code
     # reaches it directly; its owner is its only writer, and a reach from
@@ -650,7 +848,7 @@ def spec_of(objs, edges, root, concepts=None):
             e = {"from": src, "to": f"resource:{rname}", "kind": "writes" if h["write"] else "reads", "label": label,
                  "proof": [{"file": h["file"], "pattern": h["pattern"]}]}
             if len(w) == 1 and top(src) != w[0]:
-                e["flag"] = f"bypass: reaches {box_name(w[0])}'s data directly"
+                e["flag"] = f"owner bypass: reaches {box_name(w[0])}'s data directly"
             elif len(w) > 1 and h["write"]:
                 e["flag"] = "shared: written by " + ", ".join(box_name(x) for x in w)
             E.append(e)
@@ -667,9 +865,12 @@ def spec_of(objs, edges, root, concepts=None):
         if doubts:
             n["flag"] = "doubt: " + "; ".join(doubts) + (" — " + n["flag"] if n.get("flag") else "")
     for e in E:
-        b = e["to"]
-        if b in parent and not within(top(b), e["from"]) and not is_exposed(b):
-            e["flag"] = "bypass: reaches " + N[b]["name"] + " directly, not through " + objs[top(b)]["name"]
+        b, key = e["to"], (e["from"], e["to"])
+        if key in red:
+            e["flag"] = (f"private: reaches {', '.join(sorted(red[key]['members']))} of {red[key]['where']} "
+                         "from outside it")
+        elif b in parent and not within(top(b), e["from"]) and not is_exposed(b) and key in open_pairs:
+            e["flag"] = "owner bypass: reaches " + N[b]["name"] + " directly, not through " + objs[top(b)]["name"]
     # every legitimate call or access between two owners is one arrow between
     # the owners themselves; a bypass keeps its own arrow, from the exact part
     merged, keep_edges = {}, []
@@ -741,8 +942,9 @@ def overlay(concepts, objs, box, nodes, top):
 
 
 def worklist(spec):
-    """The bypasses as a refactoring worklist: one entry per part reached
-    around its owner, the most bypassed first, each with every arrow that
+    """The refactoring worklist: one entry per part, private access (red)
+    first, then owner bypasses (amber), then data with several writers;
+    within each, the most reached part first, each with every arrow that
     reaches it and its call sites (file:line)."""
     N = {n["id"]: n for n in spec["nodes"]}
 
@@ -770,7 +972,7 @@ def worklist(spec):
             if isinstance(n, (ast.Import, ast.ImportFrom)):
                 mod = getattr(n, "module", None) or ""
                 names = [x.name for x in n.names]
-                if stem in mod.split(".") or any(stem in x.split(".") or x == cls for x in names):
+                if stem in mod.split(".") or any(stem in x.split(".") or x == cls or x in members for x in names):
                     lines.add(n.lineno)
                     imported |= {x.asname or x.name for x in n.names if x.name in members or x.name == cls}
         for n in ast.walk(tree):
@@ -801,20 +1003,35 @@ def worklist(spec):
 
     groups = {}
     for e in spec["edges"]:
-        if e.get("flag", "").startswith("bypass"):
-            g = groups.setdefault(e["to"], {"part": N[e["to"]]["name"], "owner": owner(e["to"]), "arrows": []})
-            g["arrows"].append({"from": N.get(e["from"], {"name": e["from"]})["name"],
-                                "uses": e["label"].replace("  [run time only]", ""), "sites": sites(e)})
-    return sorted(groups.values(), key=lambda g: (-len(g["arrows"]), -sum(len(a["sites"]) for a in g["arrows"]), g["part"]))
+        flag = e.get("flag", "")
+        kind = next((k for k in ("private", "owner bypass", "shared") if flag.startswith(k + ":")), None)
+        if kind is None:
+            continue
+        g = groups.setdefault((kind, e["to"]), {"kind": kind, "colour": "red" if kind == "private" else "amber",
+                                                "part": N[e["to"]]["name"], "owner": owner(e["to"]), "arrows": []})
+        g["arrows"].append({"from": N.get(e["from"], {"name": e["from"]})["name"],
+                            "uses": e["label"].replace("  [run time only]", ""), "sites": sites(e)})
+    order = {"private": 0, "owner bypass": 1, "shared": 2}
+    return sorted(groups.values(), key=lambda g: (order[g["kind"]], -len(g["arrows"]),
+                                                  -sum(len(a["sites"]) for a in g["arrows"]), g["part"]))
 
 
 def print_worklist(items, out=sys.stdout):
+    heads = {"private": "Private access (red): reach it through its public interface, or make the name public",
+             "owner bypass": "Owner bypass (amber): route it through the owner, have the owner hand it out, "
+                             "or make it private",
+             "shared": "Shared data (amber): several writers; decide which one owns it"}
+    kind = None
     for i, g in enumerate(items, 1):
-        print(f"{i}. {g['part']} (owner {g['owner']}): {len(g['arrows'])} bypass(es); route each through {g['owner']}", file=out)
+        if g["kind"] != kind:
+            kind = g["kind"]
+            print(("\n" if i > 1 else "") + heads[kind], file=out)
+        what = {"private": "private access(es)", "owner bypass": "bypass(es)", "shared": "write(s) or read(s)"}[kind]
+        print(f"{i}. {g['part']} (owner {g['owner']}): {len(g['arrows'])} {what}", file=out)
         for a in g["arrows"]:
             print(f"   from {a['from']}: {a['uses']}", file=out)
-            for s in a["sites"]:
-                print(f"      {s}", file=out)
+            for s_ in a["sites"]:
+                print(f"      {s_}", file=out)
 
 
 def main():

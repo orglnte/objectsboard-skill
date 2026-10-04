@@ -26,16 +26,46 @@ decides the next change. The tools are in `tools/`.
 Every part (a module, a helper, a nested class) and every datum (a file, a
 folder, an external system's state) has exactly one owner, and everything
 else reaches it only through that owner. A class with its parts and its
-data is one unit; the class is its root. A red arrow on the board is an
-access that goes around the owner.
+data is one unit; the class is its root.
 
 On the board, all legitimate traffic between two owners is one arrow between
-the owners themselves; each bypass is its own red arrow from the exact part,
-since each is one fix.
+the owners themselves; each red or amber arrow is its own, from the exact
+part, since each is one fix.
 
-What an owner makes public is its interface: a part it exposes through a
-public attribute, method or property is reached through it, and calls into
-that part are not red. A part it keeps private and is reached anyway is.
+### Arrow colours
+
+The terms:
+
+1. **Owner:** a box, a class with behaviour of its own, placed by the
+   code's structure (its file, composition, its package's folder).
+2. **The owner's interface:** its public attributes, methods and
+   properties; the parts it hands out (a public attribute that holds one,
+   a public method or property that returns one or is named after it); and
+   the objects its public methods return (`shop.sales()` returning `Sale`s).
+3. **Public path:** no name from the caller's import or reference to the
+   member starts with an underscore (dunders such as `__init__` are public).
+4. **Python container of a private name:** the module that defines it, the
+   class (and its subclasses) for a method or a `self._x`, the package for
+   a private module (`pkg/_impl.py`).
+
+| Colour | When | Example |
+|---|---|---|
+| Red, *private access* | a name on the path starts with an underscore and the caller is outside its Python container | `shop._audit()`, `from shop._stock import count` from outside `shop/` |
+| Amber, *owner bypass* | the path is public, but it reaches a part its owner does not hand out | `shop.ledger.reset()` when Shop does not hand out its ledger, a function re-exported by the owner's package |
+| Amber, *shared* | a datum written by more than one owner, or another owner's data reached directly | two classes writing the same `out/` folder |
+| Blue | the caller goes through the owner's interface, or uses a part the owner handed out | `shop.sales()` then `sale.total()` |
+
+Red is the code breaking its own visibility rules. Amber is a design
+decision left open: route the call through the owner, have the owner hand
+the part out (blue), or hide the part behind an underscore (red until its
+callers move). The code decides what is public; the board shows where its
+structure and its visibility disagree.
+
+A private name is matched by name: an attribute counts only when exactly
+one project class or module defines it, and a private method seen at run
+time only when the caller's code names it (a private method handed over as
+a callback is not red). Constant reads are not traced, so a module imported
+only for a constant shows as a flagged box, not as an arrow.
 
 It is three established rules seen together:
 
@@ -45,10 +75,10 @@ It is three established rules seen together:
    should be hidden.
 2. **The aggregate root** (Domain-Driven Design): a cluster of objects is
    one unit, outside code holds a reference to the root only, and every
-   change goes through it. A red arrow is an aggregate-boundary violation.
+   change goes through it. An amber arrow is an aggregate-boundary violation.
 3. **The Law of Demeter:** code talks to its immediate collaborators, not
-   through them to their internals. Bypass arrows are its violations at
-   module level.
+   through them to their internals. Red and amber arrows are its violations
+   at module level.
 
 What this skill adds: placement comes from structure and the concept map,
 never from usage, so the boundary is declared, not inferred from who
@@ -134,10 +164,11 @@ decided.
    patterns (its Resources table); `--spec`
    writes the board spec. An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
-   with the observation as proof. `--worklist FILE` writes the bypasses as
-   the refactoring worklist: one entry per part reached around its owner,
-   the most bypassed first, with every arrow into it and its call sites
-   (file:line, read from the code's imports, names and attributes).
+   with the observation as proof. `--worklist FILE` writes the refactoring
+   worklist: private access (red) first, then owner bypasses and shared
+   data (amber); one entry per part, the most reached first, with every
+   arrow into it and its call sites (file:line, read from the code's
+   imports, names and attributes).
 4. **`trace_uses.py`**: runs the test suite (pytest, in process, under the
    project's own interpreter) with a profiler and records every call into the target's
    functions and the caller outside it: the call graph into the target.
@@ -275,8 +306,9 @@ cannot see is not evidence that nothing is there.
    the package's class (named after its folder, never the root); neither
    usage nor the concept map moves a box. The concepts are an overlay:
    labels, and flags for a concept spread over several owners or a box
-   carrying several. Usage flags, in the warning colour, the arrows that
-   bypass an owner and the doubts (an owner that never uses its module).
+   carrying several. Usage colours the arrows (see Arrow colours): red for
+   private access, amber for an owner bypass or shared data; amber also
+   marks the doubts (an owner that never uses its module).
    No box around everything, no folder boxes, never the module import
    graph.
 

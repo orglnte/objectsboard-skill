@@ -87,27 +87,30 @@ not seen.
 
 **The criterion:** one owner per part and per datum; everything else goes
 through the owner (information hiding, the aggregate root, the Law of
-Demeter; see METHOD.md). What the owner makes public is its interface: a
-part it exposes through a public attribute, method or property (`self.door
-= Door()`, `def window(self)`, a method named after the part's class) is
-reached through the owner when a caller uses it, not around it. Python has
-no access control, so a public part is public; to keep a part to itself,
-the owner does not expose it.
+Demeter; see METHOD.md). What the owner makes public is its interface: its
+public members, the parts it hands out (`self.door = Door()`, `def
+window(self)`, a method named after the part's class) and the objects its
+public methods return.
 
 **Arrows:** all legitimate calls and accesses between two owners are one
-arrow between the owners themselves, whichever of their parts make or
-receive them; a bypass keeps its own red arrow, from the exact part that
-makes it.
+blue arrow between the owners themselves, whichever of their parts make or
+receive them. The others keep their own arrow, from the exact part that
+makes it, coloured by the table in METHOD.md (Arrow colours):
 
-**Usage only shows what is wrong, in the warning colour:**
+1. **Red, private access:** a name on the path starts with an underscore
+   and the caller is outside its Python container (its module, its class
+   or a subclass, the package of a private module).
+2. **Amber, owner bypass:** a public path into a part its owner does not
+   hand out; **amber, shared:** data with several writers, or another
+   owner's data reached directly. Each amber arrow is a decision for the
+   user: route it through the owner, have the owner hand it out, or make
+   the part private.
 
-1. **Bypass arrows:** an arrow from outside an owner straight into one of
-   its parts that it does not expose (a module, a nested class it keeps
-   private, its data) goes around the owner.
-   `trace_objects.py --worklist FILE` ranks the bypassed parts, the most
-   bypassed first, each with its call sites (file:line).
-2. **Flagged boxes:** a part called directly from outside its owner; a
-   module its owner never uses while exactly one other class does (a doubt).
+`trace_objects.py --worklist FILE` lists them, red first, the most reached
+part first, each with its call sites (file:line). A flagged box is a part
+called directly from outside its owner, or a module its owner never uses
+while exactly one other class does (a doubt).
+
 3. **Concept findings** (the overlay above), flagged in place.
 4. Never draw one box around everything, folder boxes, or the module import
    graph as the whole-codebase board.

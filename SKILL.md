@@ -76,7 +76,9 @@ not an input.
    function `make` returns `Other(...)`); a subclass folds into its base.
 3. The package names its class: any other module, and a box class no one
    class keeps, belongs to the class named after its folder (`cell/` ->
-   Cell), or the nearest enclosing folder's, never the root's.
+   Cell), or the nearest enclosing folder's, never the root's. A package
+   with no class holds its modules in its own `__init__` module, when that
+   has code of its own.
 4. Everything else is external.
 
 **Data's owner is its only writer in the code** (a write anywhere in the

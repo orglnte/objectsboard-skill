@@ -246,8 +246,10 @@ def reexports(root, objs, owner_of_file, primary_of_dir):
     out = {}
     for p in files:
         owner = owner_of_file(str(p))[0]
-        if owner is None or not (objs[owner]["file"] == str(p) or
-                                 (p.name == "__init__.py" and primary_of_dir(p.parent) == owner)):
+        if owner is None and p.name == "__init__.py" and str(p) in objs:
+            owner = str(p)                    # a package with no class: its own module
+        elif owner is None or not (objs[owner]["file"] == str(p) or
+                                   (p.name == "__init__.py" and primary_of_dir(p.parent) == owner)):
             continue
         try:
             t = ast.parse(p.read_text())
@@ -529,7 +531,8 @@ def spec_of(objs, edges, root, concepts=None):
     2. The package names its class: any other module, and a box class that
        rule 3 does not place, belongs to the box class named after its
        folder (`cell/` -> Cell, `variants/` -> Variant), or the nearest
-       enclosing folder's; never the root's.
+       enclosing folder's; never the root's. A package with no class
+       holds its modules in its own `__init__` module, when that has code.
     3. A box class created and kept by exactly one other nests in it
        (`self.x = Other(...)`, or through a project factory function whose
        `return Other(...)` builds it); a subclass folds into its base.
@@ -609,7 +612,10 @@ def spec_of(objs, edges, root, concepts=None):
             box[oid] = o["file"]              # a module of its owner's package: drawn inside it
             parent[o["file"]] = owner
         else:
-            box[oid] = o["file"]              # external
+            box[oid] = o["file"]              # external, or a module of a package with no class:
+            init = str(Path(o["file"]).parent / "__init__.py")
+            if init in objs and init != o["file"] and Path(o["file"]).parent != rootp:
+                parent[o["file"]] = init      # its package's own module holds it
     kept_by = {}                              # a kept subclass keeps its base
     for k, o in owners(root, objs).items():
         kb, ob = sub_of.get(k, k), box.get(o, o)
@@ -700,23 +706,20 @@ def spec_of(objs, edges, root, concepts=None):
     reached_cache = {}
 
     def names_reached(f):
-        """The names f's code reaches on an object or imports (`x.queued`,
-        `from m import queued`); a bare name is a parameter or a local, so a
-        call through it is a function the caller was handed."""
+        """The names f's code reaches on another object or imports (`x.queued`,
+        `from m import queued`); a bare name or one on self is a parameter, a
+        local or its own attribute, so a call through it is a function the
+        caller was handed."""
         if f not in reached_cache:
             try:
                 t = ast.parse(Path(f).read_text(errors="replace"))
             except (OSError, SyntaxError):
                 t = ast.Module(body=[], type_ignores=[])
-            reached_cache[f] = {n.attr for n in ast.walk(t) if isinstance(n, ast.Attribute)} | \
+            reached_cache[f] = {n.attr for n in ast.walk(t) if isinstance(n, ast.Attribute)
+                                and not (isinstance(n.value, ast.Name) and n.value.id in ("self", "cls"))
+                                and not (isinstance(n.value, ast.Call) and _called_name(n.value) == "super")} | \
                 {a.asname or a.name for n in ast.walk(t) if isinstance(n, ast.ImportFrom) for a in n.names}
         return reached_cache[f]
-
-    def text_of(f):
-        try:
-            return Path(f).read_text(errors="replace")
-        except OSError:
-            return ""
 
     def through_owner(e):
         """A reach the owner allows: an object it hands out, names its own
@@ -744,11 +747,11 @@ def spec_of(objs, edges, root, concepts=None):
         priv = [m for m in e["members"] if _private(m)]
         if not priv:
             continue
-        text = text_of(ffile)
+        reached = names_reached(ffile)
         cname = objs[e["from"]]["name"].split(".")[0] if objs.get(e["from"], {}).get("kind") == "class" else None
         kind = "class" if objs.get(e["to"], {}).get("kind") == "class" else "module"
-        for m in priv:                        # a private name the caller's code names: not a callback it was handed
-            if re.search(r"\b" + re.escape(m) + r"\b", text) and not inside(ffile, cname, kind, e["to"] if kind == "class" else tfile):
+        for m in priv:                        # a private name the caller's code reaches: not a callback it was handed
+            if m in reached and not inside(ffile, cname, kind, e["to"] if kind == "class" else tfile):
                 r = red.setdefault((a, b), {"members": set(), "where": objs.get(e["to"], {"name": tfile})["name"]})
                 r["members"].add(m)
     for u in private_reaches(root, objs):

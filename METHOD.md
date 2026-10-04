@@ -307,7 +307,8 @@ cannot see is not evidence that nothing is there.
    several writers are flagged as shared). Placement from the code's
    structure only: the file's class, composition (a class kept as `self.x`,
    built directly or by a project factory function) and subclassing, then
-   the package's class (named after its folder, never the root); neither
+   the package's class (named after its folder, never the root), or a
+   classless package's own `__init__` module; neither
    usage nor the concept map moves a box. The concepts are an overlay:
    labels, and flags for a concept spread over several owners or a box
    carrying several. Usage colours the arrows (see Arrow colours): red for

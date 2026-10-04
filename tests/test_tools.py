@@ -638,3 +638,23 @@ def test_a_private_name_is_open_to_its_module_subclasses_and_package(tmp_path):
     import trace_objects
     w = trace_objects.worklist(s)
     assert [g["kind"] for g in w][:1] == ["private"]
+
+
+def test_a_package_without_a_class_holds_its_modules_and_a_kept_callback_is_not_private_access(tmp_path):
+    files = {
+        "lib/__init__.py": "",
+        "lib/cmd/__init__.py": "from lib.cmd import _out\n\n\ndef main():\n    return _out.show()\n",
+        "lib/cmd/_out.py": "def show():\n    return 1\n",
+        "lib/store.py": ("class Store:\n    def __init__(self):\n        self.book = Note(self._lock)\n\n"
+                         "    def put(self):\n        return self.book.save()\n\n    def _lock(self):\n        return 0\n\n\n"
+                         "class Note:\n    def __init__(self, changing):\n        self._changing = changing\n\n"
+                         "    def save(self):\n        return self._changing()\n"),
+        "lib/note.py": ("class Pad:\n    def __init__(self, changing):\n        self._lock = changing\n\n"
+                        "    def save(self):\n        return self._lock()\n"),
+    }
+    edges = [{"from": "lib/cmd/__init__.py", "to": "lib/cmd/_out.py", "members": ["show"]},
+             {"from": "lib/note.py:Pad", "to": "lib/store.py:Store", "members": ["_lock"]}]
+    s = _spec(tmp_path, files, edges)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/cmd/_out.py"]["parent"] == "lib/cmd/__init__.py"      # the package's own module holds it
+    assert all(not e.get("flag", "").startswith("private:") for e in s["edges"])   # Pad calls what it was handed

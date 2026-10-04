@@ -59,7 +59,8 @@ Then `/objectsboard` in Claude Code.
 7. `tools/build_audit.py` + `tools/interface-audit.template.html`: the audit
    page (the class as pseudo code, each caller and why it calls).
 8. `tools/board.py`: checks every arrow's proof against the code, lays a
-   diagram out keeping the board's existing positions, refuses an arrow into
+   diagram out keeping the board's existing positions or, with `--layout`,
+   from scratch for the fewest crossing arrows, refuses an arrow into
    a box's own parts, collapses arrows to one per pair of boxes, and makes the
    simplified view.
 9. `tools/objects-board.html`: the board, published as a claude.ai artifact

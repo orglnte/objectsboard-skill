@@ -36,6 +36,8 @@ It covers:
    `.venv/bin/python <skill>/tools/trace_uses.py --target ... -- tests -q`:
    that interpreter needs pytest and the project's dependencies. Caller
    names are fully qualified on Python 3.11+.
+3. Optional: Graphviz (`dot` on the PATH) for `board.py build --layout`;
+   without it the layout starts from a grid and crosses more arrows.
 
 ## The whole codebase: the objects representation (Python)
 
@@ -126,7 +128,8 @@ Without a map, start from the object the user's question is about.
    heading `<repo> Objects Board` (e.g. `shop Objects Board`), every diagram
    of that repo inside it; another repo gets its own board. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved
-   arrow and keeps the user's positions), seed the result, and
+   arrow and keeps the user's positions; a first draw or a redraw uses
+   `--layout`, laid out for the fewest crossing arrows), seed the result, and
    let the user duplicate and drag it into the target encapsulation. No
    arrows from a container to its own parts: nesting is the ownership. Offer
    both arrow styles and let the user pick: **detailed**, one arrow per call

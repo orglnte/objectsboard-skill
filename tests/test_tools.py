@@ -421,3 +421,38 @@ def test_a_kept_helper_class_does_not_make_its_files_class_owned(tmp_path):
         os.chdir(cwd)
     parents = {n["id"]: n.get("parent") for n in s["nodes"]}
     assert "lib/engine.py:Engine" in parents and parents["lib/engine.py:Engine"] is None
+
+
+def _box(i, x, y, parent=None):
+    return {"id": i, "name": i, "kind": "object", "members": [], "note": "", "parent": parent, "x": x, "y": y}
+
+
+def test_crossings_counts_crossing_arrows_and_arrows_over_a_box():
+    d = {"nodes": [_box("a", 0, 0), _box("b", 600, 400), _box("c", 600, 0), _box("d", 0, 400), _box("m", 300, 200)],
+         "edges": [{"from": "a", "to": "b"}, {"from": "c", "to": "d"}]}
+    assert board.crossings(d) == (1, 2)                 # the X, and both arrows over the box in the middle
+
+
+def _square_spec():
+    nodes = [_box(i, 0, 0) for i in ("a", "b", "c", "d", "e")] + [_box("p1", 0, 0, "e"), _box("p2", 0, 0, "e")]
+    edges = [("a", "c"), ("b", "d"), ("a", "d"), ("b", "c"), ("p1", "a"), ("p2", "d"), ("c", "e")]
+    return {"name": "sq", "nodes": nodes,
+            "edges": [{"from": f, "to": t, "kind": "calls", "label": "", "proof": [{"observed": "run"}]} for f, t in edges]}
+
+
+@pytest.mark.parametrize("dot", [True, False])
+def test_layout_is_deterministic_clear_of_overlaps_and_keeps_parts_inside(monkeypatch, dot):
+    if not dot:
+        monkeypatch.setattr(board.shutil, "which", lambda _: None)
+    elif not board.shutil.which("dot"):
+        pytest.skip("Graphviz not installed")
+    d1 = board.build(_square_spec(), None, None, fresh=True)
+    d2 = board.build(_square_spec(), None, None, fresh=True)
+    assert d1 == d2
+    assert all(board.overlaps(d1, n["id"]) == [] for n in d1["nodes"])
+    B = board.bounds(d1)
+    for p in ("p1", "p2"):
+        assert B["e"][0] < B[p][0] and B[p][0] + B[p][2] < B["e"][0] + B["e"][2]
+        assert B["e"][1] < B[p][1] and B[p][1] + B[p][3] < B["e"][1] + B["e"][3]
+    stacked = board.build(_square_spec(), None, None)   # the default placement, for comparison
+    assert sum(board.crossings(d1)) <= sum(board.crossings(stacked))

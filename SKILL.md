@@ -37,6 +37,20 @@ It covers:
    that interpreter needs pytest and the project's dependencies. Caller
    names are fully qualified on Python 3.11+.
 
+## The whole codebase
+
+When the user wants to see everything, draw **objects**, not modules: one
+box per class, and per module that has functions of its own, grouped by
+folder, one arrow per pair of objects that call each other, from
+`tools/trace_objects.py` (the test suite's run). Defaults:
+
+1. Never draw one box around everything: the folders are the top level.
+2. Never draw the module import graph as the whole-codebase board: imports
+   between modules hide which objects depend on which, and their arrows
+   form a jungle.
+3. Collapsed arrows (one per pair); the board's "All arrows" button then
+   shows only the selected object's.
+
 ## Input
 
 A concept map: one row per concept with a short description and the objects
@@ -73,8 +87,7 @@ Without a map, start from the object the user's question is about.
    both arrow styles and let the user pick: **detailed**, one arrow per call
    or file access, labelled with it; **collapsed** (`board.py collapse`),
    one arrow per pair of boxes with the labels merged, to see who depends on
-   whom. For a whole codebase, start collapsed. Read their diagram back
-   before proposing code.
+   whom. Read their diagram back before proposing code.
 8. Refactor toward the target one owner at a time, suites green per commit,
    and redraw the board after each step.
 

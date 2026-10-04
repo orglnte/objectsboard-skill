@@ -15,8 +15,10 @@ SPEC is the diagram to draw, with the evidence for every arrow:
                 "proof": [{"file": "app/cart.py", "pattern": "order\\\\.total\\\\("}]}]}
 
 check   every edge's proof patterns (regexes) must match in their files,
-        relative to --root; an edge with no proof, or between a box and a box
-        nested in it (ownership is the nesting, not an arrow), is refused. Exit 1 on any
+        relative to --root; a proof {"observed": "..."} (a call recorded at
+        run time) is accepted as it is; an edge with no proof, or between a
+        box and a box nested in it (ownership is the nesting, not an arrow),
+        is refused. Exit 1 on any
         failure, listing each.
 build   check, then lay out: a node already in --keep (the diagram as the
         board holds it now, e.g. from `ArtifactData get`) keeps its position
@@ -144,6 +146,8 @@ def check(spec, root):
         if not proofs:
             bad.append(f"{tag}: no proof")
         for p in proofs:
+            if "observed" in p:
+                continue                      # seen at run time (trace_objects.py): the run is the evidence
             f = root / p["file"]
             try:
                 text = f.read_text(errors="replace")

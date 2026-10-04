@@ -87,24 +87,31 @@ decided.
    attributes or properties with `--attr`), so say so on the page.
 2. **`file_contracts.py`**: every quoted mention of the given file names,
    with two lines of context.
-3. **`trace_uses.py`**: runs the test suite (pytest, in process, under the
+3. **`trace_objects.py`**: the object graph of a whole codebase from the
+   test suite's run: every class, and every module with functions of its
+   own, is an object; each call from one object into another is recorded
+   (closures and frames outside the project walked past); `--spec` writes a
+   board spec, objects grouped by folder, one arrow per pair. An arrow the
+   caller's file does not name (a subclass, a callback, an injected
+   function) is marked "[run time only]" with the observation as proof.
+4. **`trace_uses.py`**: runs the test suite (pytest, in process, under the
    project's own interpreter) with a profiler and records every call into the target's
    functions and the caller outside it: the call graph into the target.
    `--diff data.json` lists, per file, the members seen only at run time
    (missed by the static scan) and those no test runs.
-4. **`board.py`**: `check` refuses any arrow whose proof (a file and a
+5. **`board.py`**: `check` refuses any arrow whose proof (a file and a
    regex) does not match; `build` lays the diagram out, keeping the
    positions of every box the board already has and placing new ones next
    to their main neighbour without overlap, and stamps the revision;
    `collapse` merges the arrows per pair of boxes; `simplify` makes the
    simplified view. `check` also refuses an arrow
    between a box and a box nested in it.
-5. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
+6. **`build_audit.py` + `interface-audit.template.html`**: the audit page.
    Sections: the pseudo-code class; summary counts; findings; ways in; one
    card per caller (route, members used, why, finding); the full member
    table with filters (only used outside, only public unused outside, count
    tests). Clicking a member shows its docstring and every outside site.
-6. **`objects-board.html`**: a diagram editor, published as an artifact with
+7. **`objects-board.html`**: a diagram editor, published as an artifact with
    `capabilities: {db: {}}`.
    1. **Boxes** have a name, a kind (object, module, process, file, folder,
       external), an origin (library, or app: code built on
@@ -147,7 +154,7 @@ cannot see is not evidence that nothing is there.
 2. **Static scan, module and function targets:** `importlib` or
    `__import__` with a computed name; a module-level `__getattr__`; names
    re-exported through another module (target the re-exporting module too).
-3. **Run-time trace (`trace_uses.py`):** code the tests never run, so the
+3. **Run-time traces (`trace_uses.py`, `trace_objects.py`):** code the tests never run, so the
    call graph is only as complete as the suite's coverage of the code that
    uses the target; reads of plain attributes, constants and data objects
    (no function runs); calls in another process (subprocesses the tests
@@ -202,6 +209,10 @@ cannot see is not evidence that nothing is there.
    caller's box lists exactly the members it uses; each arrow reads
    `calls N members`. Callers nested by owner show which owner needs which
    slice.
+6. **Whole codebase:** objects, not modules (`trace_objects.py`): one box
+   per class and per module with functions of its own, grouped by folder,
+   collapsed arrows. Never a box around everything, never the module import
+   graph (it hides which objects depend on which).
 
 ## Pitfalls
 

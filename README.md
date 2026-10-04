@@ -45,17 +45,20 @@ Then `/objectsboard` in Claude Code.
    outside use, as JSON, for a module, a class or a function; for classes it
    follows factories, parameters, stand-ins and attributes or properties that
    hold an instance.
-4. `tools/trace_uses.py`: the run-time cross-check and the call graph into
+4. `tools/trace_objects.py`: the object graph of a whole codebase (classes,
+   and modules with functions of their own), one arrow per pair, from the
+   test suite's run; writes a board spec grouped by folder.
+5. `tools/trace_uses.py`: the run-time cross-check and the call graph into
    the object, recorded while the test suite runs (needs good test coverage;
    Python 3.11+).
-5. `tools/file_contracts.py`: every mention of given file names, to find
+6. `tools/file_contracts.py`: every mention of given file names, to find
    what goes around an object through its files.
-6. `tools/build_audit.py` + `tools/interface-audit.template.html`: the audit
+7. `tools/build_audit.py` + `tools/interface-audit.template.html`: the audit
    page (the class as pseudo code, each caller and why it calls).
-7. `tools/board.py`: checks every arrow's proof against the code, lays a
+8. `tools/board.py`: checks every arrow's proof against the code, lays a
    diagram out keeping the board's existing positions, refuses an arrow into
    a box's own parts, collapses arrows to one per pair of boxes, and makes the
    simplified view.
-8. `tools/objects-board.html`: the board, published as a claude.ai artifact
+9. `tools/objects-board.html`: the board, published as a claude.ai artifact
    with a shared database (`capabilities: {db: {}}`).
-9. `tests/`: `python3 -m pytest tests -q`.
+10. `tests/`: `python3 -m pytest tests -q`.

@@ -173,3 +173,19 @@ def test_collapse_keeps_the_boxes_and_merges_arrows_per_pair():
     assert c["nodes"] == d["nodes"]
     assert [(e["from"], e["to"], e["kind"], e["label"]) for e in c["edges"]] == [
         ("a", "b", "calls", "get · config.json"), ("b", "a", "calls", "notify")]
+
+
+def test_trace_objects_records_calls_between_objects_not_within_one(app):
+    out, spec = app / "objects.json", app / "spec.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_objects.py"), "--root", "app", "--out", str(out),
+                    "--spec", str(spec), "--", "tests", "-q", "-p", "no:cacheprovider"],
+                   cwd=app, check=True, capture_output=True)
+    d = json.loads(out.read_text())
+    assert d["pytest_exit"] == 0
+    pairs = {(e["from"], e["to"]) for e in d["edges"]}
+    assert ("app/service.py", "app/store.py:Store") in pairs
+    assert ("app/report.py", "app/store.py:Store") in pairs
+    assert all(a != b for a, b in pairs)
+    s = json.loads(spec.read_text())
+    assert not [n for n in s["nodes"] if n["kind"] == "folder" and n.get("parent")]
+    assert board.check(s, app) == []

@@ -1,17 +1,12 @@
 # objectsboard
 
-A Claude Code skill for concepts, separation of concerns, encapsulation and
+A Claude Code skill for separation of concerns, encapsulation and
 abstraction: it draws a codebase's objects as the code has them, lays its
 concepts over them, and reviews the architecture for patterns, antipatterns
-and dark concepts, interactively, through an Objects Board. It takes a
-concept map (what the software is for), reviews one object at a time (its
-whole interface, every outside caller, everything that reaches its files
-without it), draws the current state on a live board, and supports the
-design round by round: you pick the next change, the code changes, the
-board is redrawn from the code.
+and dark concepts, interactively, through an Objects Board.
 
-It sits after concept design: write the concept map yourself, or produce it
-with a concept-design skill such as
+It (optionally) sits after concept design: write the concept map yourself,
+or produce it with a concept-design skill such as
 [concept-skills](https://github.com/ontology-of-everything/concept-skills),
 then use objectsboard to make the objects match it.
 

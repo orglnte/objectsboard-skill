@@ -3,7 +3,8 @@ message: "If you use or adapt objectsboard, please cite it as below."
 title: "objectsboard: a Claude Code skill for separation of concerns, encapsulation and abstraction"
 type: software
 authors:
-  - alias: orglnte
+  - name: "The objectsboard authors"
+    website: "https://github.com/orglnte/objectsboard-skill"
 repository-code: "https://github.com/orglnte/objectsboard-skill"
 url: "https://github.com/orglnte/objectsboard-skill"
 license: Apache-2.0

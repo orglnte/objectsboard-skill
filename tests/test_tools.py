@@ -290,7 +290,7 @@ def test_objects_representation_rules(tmp_path):
     N = {n["id"]: n for n in s["nodes"]}
     assert "lib/shapes.py:Square" not in N and "lib/shapes.py" not in N   # subclass and helpers fold into Shape
     assert N["lib/report/fmt.py"]["parent"] == "lib/report/report.py:Report"   # report/ names Report
-    assert (N["lib/util.py"]["kind"], N["lib/util.py"]["parent"]) == ("module", None)   # the root owns nothing
+    assert (N["lib/util.py"]["kind"], N["lib/util.py"]["parent"]) == ("module", "unowned:group")   # no class owns it
     assert [(m["into"], m["other_users"]) for m in s["moves"] if m["module"] == "lib/report/fmt.py"] == [
         ("lib/report/report.py:Report", ["lib/util.py"])]                       # util goes around Report
     assert [n["kind"] for n in s["nodes"] if n["id"] == "resource:out/"] == ["folder"]
@@ -546,26 +546,25 @@ def _unowned_spec():
     return {"name": "x", "nodes": nodes, "edges": edges}
 
 
-def test_modules_many_reach_and_that_reach_little_go_in_the_unowned_group():
+def test_every_top_level_module_no_class_owns_goes_in_the_unowned_group():
     import trace_objects
     s = _unowned_spec()
-    trace_objects.group_unowned(s["nodes"], s["edges"])
+    s["nodes"].append({"id": "lib/u0/fmt.py", "name": "fmt.py", "kind": "module", "parent": "lib/u0.py:U0", "note": ""})
+    trace_objects.group_unowned(s["nodes"])
     P = {n["id"]: n.get("parent") for n in s["nodes"]}
-    assert P["lib/errors.py"] == P["lib/types.py"] == "unowned:group"
-    assert P["lib/engine.py"] is None                                  # it reaches two boxes: stays out
-    assert [n["kind"] for n in s["nodes"] if n["id"] == "unowned:group"] == ["unowned"]
+    assert P["lib/errors.py"] == P["lib/types.py"] == P["lib/engine.py"] == "unowned:group"
+    assert P["lib/u0/fmt.py"] == "lib/u0.py:U0" and P["lib/u0.py:U0"] is None   # owned ones and classes stay
     w = trace_objects.worklist(s)
     assert [(g["part"], g["owner"]) for g in w] == [("errors.py", "errors.py")]   # the group owns nothing
-    one = _unowned_spec()
-    one["edges"] = [e for e in one["edges"] if e["to"] != "lib/types.py"]
-    trace_objects.group_unowned(one["nodes"], one["edges"])
-    assert not any(n["kind"] == "unowned" for n in one["nodes"])        # a group of one is no group
+    none = [n for n in _unowned_spec()["nodes"] if n["kind"] == "object"]
+    trace_objects.group_unowned(none)
+    assert not any(n["kind"] == "unowned" for n in none)                # no unowned module: no group
 
 
 def test_the_simplified_view_keeps_the_unowned_groups_members_as_boxes():
     import trace_objects
     s = _unowned_spec()
-    trace_objects.group_unowned(s["nodes"], s["edges"])
+    trace_objects.group_unowned(s["nodes"])
     v = board.simplify(s)
     ids = {n["id"] for n in v["nodes"]}
     assert {"lib/errors.py", "lib/types.py", "unowned:group"} <= ids

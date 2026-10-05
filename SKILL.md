@@ -55,9 +55,8 @@ an exception), every box drawn even when no arrow reaches it, one arrow
 per pair of boxes that call each other at run time (a dotted "uses" arrow
 when only the source names the other box: an import or a name, no call
 seen), a box no call between project objects reached at run time marked
-UNOBSERVED, modules no class holds as module boxes of their own (those
-that 5 or more boxes reach and that reach 1 at most drawn together in the
-**unowned group**, a box that is not an owner), and the **resources (data)**: the files,
+UNOBSERVED, modules no class holds as module boxes of their own, drawn
+together in the **unowned group** (a box that is not an owner), and the **resources (data)**: the files,
 folders and external systems the code keeps data in or drives, named with
 the code patterns that reach them in a Resources table (Resource | Kind |
 Owner | Reached by), in its own file (`--data`) or in the concept map.

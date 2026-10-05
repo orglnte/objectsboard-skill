@@ -10,7 +10,7 @@
     --k-file: #7c5a12; --k-file-fill: #faf3e2; --k-process: #6a4fa3; --k-process-fill: #f1edf9;
     --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6;
     --e-calls: #2563a6; --e-reads: #2f8a57; --e-writes: #c2410c; --e-spawns: #6a4fa3;
-    --exp: #b45309; --warn: #d4261c; --amber: #b7791f;
+    --exp: #b45309; --warn: #d4261c; --amber: #b7791f; --grey: #b9c0c7; --grey-fill: #eef0f2;
     --sans: "Fira Sans", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
     --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
@@ -21,7 +21,7 @@
       --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
       --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
       --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
-      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d;
+      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d; --grey: #4b535b; --grey-fill: #1d2125;
       color-scheme: dark;
     }
   }
@@ -58,6 +58,9 @@
   .kt i { width: 14px; height: 0; border-top: 2px solid var(--c); display: inline-block; }
   .kt.dash i { border-top-style: dashed; }
   .kt.off { opacity: .4; }
+  .kt b { width: 12px; height: 9px; border: 1.5px solid var(--c); background: var(--f); border-radius: 2px; display: inline-block; }
+  .kt.dash b { border-style: dashed; }
+  .kt.sep { border: 0; padding: 0; width: 1px; height: 1.1rem; background: var(--rule); cursor: default; }
 
   .stage { position: relative; overflow: hidden; background: var(--canvas); min-height: 0; touch-action: none; }
   svg#cv { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
@@ -96,6 +99,8 @@
   .edge.flagged path:not(.hit) { stroke: var(--warn) !important; stroke-width: 2; }
   .edge.flagged text { fill: var(--warn); }
   .node.flagged.amber rect.box { stroke: var(--amber) !important; }
+  .node.grey rect.box { fill: var(--grey-fill) !important; stroke: var(--grey) !important; }
+  .node.grey text { fill: var(--ink-3) !important; }
   .node.amber text.flag { fill: var(--amber); }
   .edge.flagged.amber path:not(.hit) { stroke: var(--amber) !important; }
   .edge.flagged.amber text { fill: var(--amber); }
@@ -160,11 +165,32 @@ const EKINDS = [
   { k: "writes", label: "writes", dash: "" },
   { k: "spawns", label: "spawns", dash: "2 4" },
 ];
+// what each chip means, shown as its tooltip
+const ELABEL = { calls: "calls", reads: "reads data", writes: "writes data", spawns: "starts a process" };
+const BLABEL = { object: "class (owner)", module: "module", process: "process", file: "file (data)", folder: "folder (data)", external: "external code" };
+const FLAGS = [
+  { k: "red", label: "private access", c: "var(--warn)", mean: "a name starting with an underscore reached from outside its module, class or package" },
+  { k: "amber", label: "owner bypass / shared", c: "var(--amber)", mean: "a public path to a part its owner doesn't expose, or data with several writers, or another owner's data reached directly" },
+];
+const EMEAN = {
+  calls: "calls a member. In this colour it goes through the owner's interface; red is private access, amber an owner bypass",
+  reads: "reads data. Amber when it reaches another owner's data directly",
+  writes: "writes data. Amber when the data has several writers",
+  spawns: "starts a separate process",
+};
+const BMEAN = {
+  object: "a class with behaviour of its own: an owner. A box inside another is owned by it",
+  module: "functions with no class, inside the owner whose package holds them",
+  process: "a separate process",
+  file: "data kept in one file",
+  folder: "data kept in a folder",
+  external: "code no owner holds",
+};
 const S = {
   db: null, local: false, list: [], did: null, d: null, saving: false, dirty: false, saveTimer: null,
   sel: null, selEdge: null, connectFrom: null, connecting: false, edgeOnlySel: false, labels: true,
   hide: new Set(), view: { x: 0, y: 0, k: 0.75 }, drag: null, armed: null,
-  undo: [], redo: [], base: null, written: [],
+  undo: [], redo: [], base: null, written: [], greyKinds: new Set(), hideFlags: new Set(),
 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -211,6 +237,7 @@ function layoutBounds() {
 function kindColors(k) { return { s: `var(--k-${k})`, f: `var(--k-${k}-fill)` }; }
 function edgeVisible(e) {
   if (S.hide.has(e.kind)) return false;
+  if (e.flag && S.hideFlags.has(sev(e.flag) === "amber" ? "amber" : "red")) return false;
   if (S.edgeOnlySel && S.sel) return e.from === S.sel || e.to === S.sel;
   if (S.edgeOnlySel && !S.sel) return false;
   return true;
@@ -232,7 +259,7 @@ function render() {
   for (const n of order) {
     const b = L[n.id], c = kindColors(n.kind), cont = children(n.id).length > 0;
     const dim = S.sel && S.edgeOnlySel === false && rel.size && !rel.has(n.id) && n.id !== S.sel && !isDesc(S.sel, n.id, B) && !isDesc(n.id, S.sel, B) && !cont;
-    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag)].join(" ");
+    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag), S.greyKinds.has(n.kind) ? "grey" : ""].join(" ");
     const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : "";
     g += `<g class="${cls}" data-n="${esc(n.id)}" transform="translate(${b.x},${b.y})">
       ${n.id === S.sel ? `<rect class="selring" x="-5" y="-5" width="${b.w + 10}" height="${b.h + 10}" rx="10"></rect>` : ""}
@@ -354,7 +381,10 @@ function side() {
 }
 function bar() {
   $("dsel").innerHTML = S.list.map(d => `<option value="${esc(d.id)}" ${d.id === S.did ? "selected" : ""}>${esc(d.name)}</option>`).join("");
-  $("kinds").innerHTML = EKINDS.map(x => `<span class="kt ${x.dash ? "dash" : ""} ${S.hide.has(x.k) ? "off" : ""}" data-k="${x.k}" style="--c:var(--e-${x.k})" role="button" tabindex="0" aria-pressed="${!S.hide.has(x.k)}"><i></i>${x.label}</span>`).join("");
+  $("kinds").innerHTML = EKINDS.map(x => `<span class="kt ${x.dash ? "dash" : ""} ${S.hide.has(x.k) ? "off" : ""}" data-k="${x.k}" style="--c:var(--e-${x.k})" role="button" tabindex="0" aria-pressed="${!S.hide.has(x.k)}" title="${esc(EMEAN[x.k] || x.label)}"><i></i>${ELABEL[x.k] || x.label}</span>`).join("")
+    + FLAGS.map(f => `<span class="kt ${S.hideFlags.has(f.k) ? "off" : ""}" data-f="${f.k}" style="--c:${f.c}" role="button" tabindex="0" aria-pressed="${!S.hideFlags.has(f.k)}" title="${esc(f.mean)}"><i></i>${f.label}</span>`).join("")
+    + `<span class="kt sep" aria-hidden="true"></span>`
+    + KINDS.map(k => `<span class="kt ${k === "folder" || k === "process" ? "dash" : ""} ${S.greyKinds.has(k) ? "off" : ""}" data-b="${k}" style="--c:var(--k-${k});--f:var(--k-${k}-fill)" role="button" tabindex="0" aria-pressed="${!S.greyKinds.has(k)}" title="${esc(BMEAN[k] || k)}"><b></b>${BLABEL[k] || k}</span>`).join("");
   $("connect").classList.toggle("on", S.connecting);
   $("undo").disabled = !S.undo.length; $("redo").disabled = !S.redo.length;
   $("edgemode").textContent = S.edgeOnlySel ? "Selected box's arrows" : "All arrows";
@@ -578,7 +608,11 @@ $("zfit").onclick = fit;
 $("connect").onclick = () => { S.connecting = !S.connecting; S.connectFrom = null; bar(); };
 $("edgemode").onclick = () => { S.edgeOnlySel = !S.edgeOnlySel; all(); };
 $("showlabels").onclick = () => { S.labels = !S.labels; all(); };
-$("kinds").addEventListener("click", e => { const t = e.target.closest(".kt"); if (!t) return; const k = t.dataset.k; S.hide.has(k) ? S.hide.delete(k) : S.hide.add(k); all(); });
+$("kinds").addEventListener("click", e => {
+  const t = e.target.closest(".kt"); if (!t || t.classList.contains("sep")) return;
+  const [set, k] = t.dataset.b ? [S.greyKinds, t.dataset.b] : t.dataset.f ? [S.hideFlags, t.dataset.f] : [S.hide, t.dataset.k];
+  set.has(k) ? set.delete(k) : set.add(k); all();
+});
 $("kinds").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.target.click(); } });
 $("addnode").onclick = () => {
   if (!S.d) return;

@@ -1120,7 +1120,8 @@ def main():
                                    "the data, without a concept map")
     ap.add_argument("--tests-dir", default="tests")
     ap.add_argument("--worklist", metavar="FILE",
-                    help="with --spec: write the bypasses as a refactoring worklist, the most bypassed part first")
+                    help="with --spec: write the refactoring worklist: private access (red), then owner bypasses "
+                         "and shared data (amber), the most reached part first")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER)
     a = ap.parse_args()
     args = a.pytest_args[1:] if a.pytest_args[:1] == ["--"] else a.pytest_args

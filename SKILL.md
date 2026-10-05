@@ -48,7 +48,8 @@ It covers:
 
 When the user wants to see everything, draw the objects representation of
 the code **as it is**: `tools/trace_objects.py --spec ...`, with
-`--data <Resources table>` or `--concepts <concept map>` when there is one. Boxes are the classes with behaviour of their own (a public
+`--data <Resources table>` or `--concepts <concept map>` when there is one.
+Boxes are the classes with behaviour of their own (a public
 method; not a value class such as a dataclass, NamedTuple or Enum, and not
 an exception), one arrow per pair of boxes that call each other, modules no
 class holds as external boxes, and the **resources (data)**: the files,

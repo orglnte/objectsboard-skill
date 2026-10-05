@@ -1,9 +1,10 @@
 # Objectsboard method
 
-For one object at a time: what it really offers, who reaches it and why,
-and what goes around it; for the whole codebase, the objects as the code
-has them, with a concept map laid over them when there is one; then a
-board where the user decides the next change. The tools are in `tools/`.
+For the whole codebase, the objects as the code has them, with what goes
+around each owner coloured, and a concept map laid over them when there is
+one; for one object, what it really offers, who reaches it and why, and what
+goes around it; then a board where the user decides the next change, one
+owner at a time. The tools are in `tools/`.
 
 ## Concepts and objects
 
@@ -94,12 +95,14 @@ the box is a doubt for the user to settle.
 
 ## Why one object at a time
 
-An import graph shows modules and imports only; a refactor planned from it
-reshuffles packages without fixing anything a user or a test can see. Object
-design has more than one level (an object, what it owns, what it exposes,
-who calls it, which files stand in for it), and a review that starts from a
-single object sees all of them. Do the next object only after this one is
-decided.
+Seeing is the whole codebase at once: the board and its worklist show every
+owner and every arrow around one. Deciding and changing go one owner at a
+time. An import graph shows modules and imports only; a refactor planned
+from it reshuffles packages without fixing anything a user or a test can
+see. Object design has more than one level (an object, what it owns, what it
+exposes, who calls it, which files stand in for it), and a review that starts
+from a single owner sees all of them. Each move is one commit with the suites
+green, and the board is redrawn before the next owner is decided.
 
 ## Method
 

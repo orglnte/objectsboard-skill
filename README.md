@@ -1,17 +1,19 @@
 # objectsboard
 
-A Claude Code skill for separation of concerns, encapsulation and
-abstraction: it draws a codebase's objects as the code has them, lays its
-concepts over them, and reviews the architecture for patterns, antipatterns
-and dark concepts, interactively, through an Objects Board.
+A live board of Python objects for interactive architecture refactoring
+with coding agents. This Claude Code skill draws a codebase's objects as the
+code has them, colours every call or data access that goes around an owner
+(red: private access; amber: owner bypass or shared data), and supports the
+refactoring one owner at a time: you decide each move on the board, the
+agent changes the code, the board is redrawn from it.
 
 It (optionally) integrates with concept design: write the concept map
 yourself, or produce it with a concept-design skill such as
 [concept-skills](https://github.com/ontology-of-everything/concept-skills),
 then use objectsboard to make the objects match it.
 
-Python only for now: the extractor parses Python source. The method and the
-board apply to any language.
+Python only for now: the tools parse Python source and trace the test suite.
+The method and the board apply to any language.
 
 What each tool cannot see is listed in `METHOD.md`, "What the tools cannot
 see".
@@ -22,7 +24,9 @@ see".
 2. `tools/trace_uses.py` imports the project and runs its tests, so run it
    with the project's own interpreter from the project root (for example
    `.venv/bin/python ~/code/objectsboard-skill/tools/trace_uses.py ...`);
-   that interpreter needs pytest and the project's dependencies.
+   that interpreter needs pytest and the project's dependencies; so does
+   `tools/trace_objects.py`.
+3. Optional: Graphviz (`dot`) for `tools/board.py build --layout`.
 
 ## Install
 
@@ -43,10 +47,12 @@ Then `/objectsboard` in Claude Code.
    follows factories, parameters, stand-ins and attributes or properties that
    hold an instance.
 4. `tools/trace_objects.py`: the objects representation of a whole
-   codebase as the code has it: its classes with behaviour, one arrow per
-   pair that call each other, modules no class holds as external boxes,
-   the concepts as an overlay; from the test suite's run and the source. `--worklist` ranks the bypasses
-   into the refactoring order, with their call sites.
+   codebase as the code has it, from the test suite's run and the source:
+   its classes with behaviour, one arrow per pair of owners, red and amber
+   arrows for what goes around an owner, the data from a Resources table
+   (`--data`) and, optionally, a concept map laid over the boxes
+   (`--concepts`). `--worklist` lists the red and amber arrows as the
+   refactoring order, with their call sites.
 5. `tools/trace_uses.py`: the run-time cross-check and the call graph into
    the object, recorded while the test suite runs (needs good test coverage;
    Python 3.11+).

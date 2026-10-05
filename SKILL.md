@@ -143,6 +143,11 @@ Without either, start from the object the user's question is about.
 
 ## Steps
 
+0. Ask once whether the repo has a concept map or a Resources table (look
+   for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
+   Resources table only, so the board has data findings; a concept map,
+   written by hand or with a concept-design skill, for the concept overlay;
+   or neither. Never block on it.
 1. Pick ONE object: the one the question is about, or the largest class or
    module on its path. In Python everything is an object: a module, a class
    or a function can be the target (`path/mod.py`, `path/mod.py:Name`). Never

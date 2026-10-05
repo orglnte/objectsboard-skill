@@ -161,8 +161,8 @@ Without either, start from the object the user's question is about.
 
 0. Look for `.objectsboard.json` in the repo root first: it holds the
    answers to this step from an earlier session (`{"data": ..., "concepts":
-   ..., "root_owns": ..., "group_unowned": ..., "arrows": "collapsed" |
-   "detailed"}`), and `trace_objects.py` reads it for every option its
+   ..., "root_owns": ..., "group_unowned": ..., "exclude": [folders],
+   "arrows": "collapsed" | "detailed"}`), and `trace_objects.py` reads it for every option its
    command line leaves out. When it is there, show the saved answers in one
    line, say how to change them (below) and skip the questions. Otherwise,
    ask once whether the repo has a concept map or a Resources table (look
@@ -180,6 +180,9 @@ Without either, start from the object the user's question is about.
       unowned group (not an owner; titled with the deepest folder they
       share)? Yes runs it with `--group-unowned`; no leaves each module
       box on its own.
+   3. Any folders to leave out (vendored code, generated code, examples)?
+      They go in `exclude` (`--exclude DIR`, paths from the repo root) and
+      are left out of every scan: no box, no arrow, no call traced.
    After the questions, write the answers to `.objectsboard.json` in the
    repo root (never commit it: the user decides whether the repo keeps it
    or ignores it) and tell the user how to change them later: say which one

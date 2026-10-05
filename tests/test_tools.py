@@ -622,14 +622,38 @@ def test_saved_answers_fill_the_options_the_command_line_leaves_out(tmp_path):
     import argparse, trace_objects
     prefs = tmp_path / ".objectsboard.json"
     assert trace_objects.load_prefs(str(prefs)) == {}                    # none saved
-    prefs.write_text(json.dumps({"root_owns": True, "group_unowned": True, "data": "DATA.md"}))
+    prefs.write_text(json.dumps({"root_owns": True, "group_unowned": True, "data": "DATA.md", "exclude": ["lib/vendor"]}))
     saved = trace_objects.load_prefs(str(prefs))
-    cli = argparse.Namespace(root_owns=None, group_unowned=False, data=None, concepts=None)
+    cli = argparse.Namespace(root_owns=None, group_unowned=False, data=None, concepts=None, exclude=None)
     assert trace_objects.options(cli, saved) == {"root_owns": True, "group_unowned": False,   # the flag wins
-                                                 "data": "DATA.md", "concepts": None}
+                                                 "data": "DATA.md", "concepts": None, "exclude": ["lib/vendor"]}
+    cli.exclude = ["lib/gen"]
+    assert trace_objects.options(cli, saved)["exclude"] == ["lib/gen"]
     prefs.write_text("{not json")
     with pytest.raises(SystemExit):
         trace_objects.load_prefs(str(prefs))
+
+
+def test_an_excluded_folder_is_left_out_of_every_scan(tmp_path):
+    import trace_objects
+    files = dict(STATIC, **{"lib/vendor/__init__.py": "", "lib/vendor/six.py": "class Six:\n    def go(self):\n        return 1\n",
+                            "lib/api.py": STATIC["lib/api.py"] + "\n\nfrom lib.vendor.six import Six\n\n\ndef six():\n    return Six().go()\n"})
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        trace_objects.EXCLUDE[:] = ["lib/vendor"]
+        fns, objs = trace_objects.objects("lib")
+        static = trace_objects.static_uses("lib", objs)
+    finally:
+        trace_objects.EXCLUDE[:] = []
+        os.chdir(cwd)
+    assert not any(k.startswith("lib/vendor") for k in objs)
+    assert not any(e["to"].startswith("lib/vendor") for e in static)
+    assert "lib/api.py:Api" in objs                                       # the rest is still scanned
 
 
 def _box(i, x, y, parent=None):

@@ -174,7 +174,8 @@ green, and the board is redrawn before the next owner is decided.
    Resources table (the data and the code patterns that reach it);
    `--concepts`, optional, names a concept map laid over the boxes, whose
    own Resources table serves when `--data` is not given; `--spec`
-   writes the board spec. An arrow the caller's file does not name (a
+   writes the board spec; `--exclude DIR` (repeatable, or `exclude` in
+   `.objectsboard.json`) leaves a folder out of every scan. An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
    with the observation as proof. A pair the run never saw, where the
    source names a class or function of the other box (followed through

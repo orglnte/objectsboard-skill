@@ -45,13 +45,22 @@ import argparse, ast, json, os, re, sys, threading
 from pathlib import Path
 
 
+EXCLUDE = []                                  # folders left out of every scan (set by main or a caller)
+
+
+def py_files(root):
+    """Every Python file under root, sorted, minus __pycache__ and the
+    folders in EXCLUDE (paths as given, relative to the current folder)."""
+    skip = [Path(e) for e in EXCLUDE]
+    return [p for p in sorted(Path(root).rglob("*.py"))
+            if "__pycache__" not in p.parts and not any(p == e or e in p.parents for e in skip)]
+
+
 def objects(root):
     """{(filename, first line): (object id, member)} for every function under
     root, and {object id: {"file", "name", "kind"}}."""
     fns, objs = {}, {}
-    for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
+    for p in py_files(root):
         try:
             t = ast.parse(p.read_text())
         except (SyntaxError, UnicodeDecodeError):
@@ -153,7 +162,7 @@ class Names:
     one."""
 
     def __init__(self, root):
-        files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+        files = py_files(root)
         self.mod_file = {_dotted(p): str(p) for p in files}
         self.trees, self.defined, self.imports, self.stars = {}, {}, {}, {}
         for p in files:
@@ -269,7 +278,7 @@ def private_reaches(root, objs):
     "class" (definer a class id; holds the classes the attribute is built
     from), "module" (definer a module file) or "path" (definer the private
     module's file, name its private segment)."""
-    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+    files = py_files(root)
     trees = []
     for p in files:
         try:
@@ -359,7 +368,7 @@ def reexports(root, objs, owner_of_file, primary_of_dir):
     or its package's `__init__.py`, imports at module level from one of its
     parts (`from ._stock import count`): what the owner exposes in its
     module's namespace is its interface."""
-    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+    files = py_files(root)
 
     def dotted(p):
         parts = list(p.with_suffix("").parts)
@@ -399,7 +408,7 @@ def processes(root):
     the file itself (`[sys.executable, os.path.abspath(__file__), ...]`).
     Only argv literals count, never a mention in a docstring or a log line.
     Each is {"file", "cls", "line", "module", "entry", "pattern"}."""
-    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+    files = py_files(root)
 
     def dotted(p):
         parts = list(p.with_suffix("").parts)
@@ -593,7 +602,7 @@ def importers(root):
     modules under root: an import, or a string naming it (`python -m pkg.mod`,
     its file path), which is how a module run as a separate process is
     reached."""
-    files = {p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts}
+    files = py_files(root)
 
     def dotted(p):
         parts = list(p.with_suffix("").parts)
@@ -640,7 +649,7 @@ def static_uses(root, objs):
     code that names a project class or function it imported (`from m import
     A` then `A(...)`, `A.x`; `import m` then `m.f`). An import that nothing
     uses, a re-export, is not a use."""
-    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+    files = py_files(root)
 
     def dotted(p):
         parts = list(p.with_suffix("").parts)
@@ -745,9 +754,7 @@ def path_helpers(root, res_rows):
     Their callers are the ones that read or write it. Matched by name, so a
     name two functions share, or a generic one, is left out."""
     found, seen = {}, {}
-    for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
+    for p in py_files(root):
         try:
             text = p.read_text()
             t = ast.parse(text)
@@ -1186,9 +1193,7 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
         hits = {}
         helpers = path_helpers(root, res_rows)
         helper_call = re.compile(r"(?<![\w])(" + "|".join(map(re.escape, helpers)) + r")\(") if helpers else None
-        for pth in sorted(rootp.rglob("*.py")):
-            if "__pycache__" in pth.parts:
-                continue
+        for pth in py_files(rootp):
             try:
                 text = pth.read_text()
                 tree = ast.parse(text)
@@ -1487,7 +1492,7 @@ PREFS = ".objectsboard.json"
 
 def load_prefs(path=PREFS):
     """The step 0 answers saved in the repo root ({"root_owns", "group_unowned",
-    "data", "concepts", "arrows"}); {} when there is none."""
+    "data", "concepts", "exclude", "arrows"}); {} when there is none."""
     try:
         with open(path) as f:
             prefs = json.load(f)
@@ -1506,7 +1511,8 @@ def options(a, prefs):
     pick = lambda flag, key, default: flag if flag is not None else prefs.get(key, default)
     return {"root_owns": bool(pick(a.root_owns, "root_owns", False)),
             "group_unowned": bool(pick(a.group_unowned, "group_unowned", False)),
-            "data": pick(a.data, "data", None), "concepts": pick(a.concepts, "concepts", None)}
+            "data": pick(a.data, "data", None), "concepts": pick(a.concepts, "concepts", None),
+            "exclude": list(pick(a.exclude, "exclude", []))}
 
 
 def main():
@@ -1525,12 +1531,16 @@ def main():
     ap.add_argument("--group-unowned", action=argparse.BooleanOptionalAction,
                     help="draw the top-level modules no class owns together in one box, the unowned group "
                          "(it owns nothing); by default each stands alone")
+    ap.add_argument("--exclude", action="append", metavar="DIR",
+                    help="a folder to leave out of every scan (repeatable; a path from the current folder, "
+                         "such as pkg/vendor)")
     ap.add_argument("--worklist", metavar="FILE",
                     help="with --spec: write the refactoring worklist: private access (red), then owner bypasses "
                          "and shared data (amber), the most reached part first")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER)
     a = ap.parse_args()
     opt = options(a, load_prefs())
+    EXCLUDE[:] = opt["exclude"]
     args = a.pytest_args[1:] if a.pytest_args[:1] == ["--"] else a.pytest_args
     rc, hits, objs = run(a.root, args, a.tests_dir)
     pairs = {}

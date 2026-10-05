@@ -5,7 +5,7 @@ abstraction: it draws a codebase's objects as the code has them, lays its
 concepts over them, and reviews the architecture for patterns, antipatterns
 and dark concepts, interactively, through an Objects Board.
 
-It (optionally) sits after concept design: write the concept map yourself,
+It (optionally) integrates concept design: write the concept map yourself,
 or produce it with a concept-design skill such as
 [concept-skills](https://github.com/ontology-of-everything/concept-skills),
 then use objectsboard to make the objects match it.

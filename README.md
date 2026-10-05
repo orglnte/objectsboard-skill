@@ -66,7 +66,10 @@ Then `/objectsboard` in Claude Code.
    a box's own parts, collapses arrows to one per pair of boxes, and makes the
    simplified view.
 9. `tools/objects-board.html`: the board, published as a claude.ai artifact
-   with a shared database (`capabilities: {db: {}}`).
+   with a shared database (`capabilities: {db: {}, downloads: true}`). It
+   also runs on its own, from any static host or a local file: diagrams
+   then stay in that browser, and Import loads a `board.py build` JSON
+   (Export saves one).
 10. `tests/`: `python3 -m pytest tests -q`.
 
 ## License and citation

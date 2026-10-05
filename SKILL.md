@@ -172,7 +172,8 @@ Without either, start from the object the user's question is about.
 6. Report the findings as checkable facts with file and line; stop and let
    the user decide.
 7. Publish `tools/objects-board.html` as an artifact with `capabilities: {db:
-   {}}`. A board is per repo: one artifact per repo, its `<title>` and
+   {}, downloads: true}` (or open it anywhere and Import the `board.py
+   build` JSON: away from claude.ai it keeps diagrams in the browser). A board is per repo: one artifact per repo, its `<title>` and
    heading `<repo> Objects Board` (e.g. `shop Objects Board`), every diagram
    of that repo inside it; another repo gets its own board. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved

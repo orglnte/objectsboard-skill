@@ -126,6 +126,9 @@
       <select id="dsel" aria-label="Diagram"></select>
       <button id="dnew" type="button">New</button>
       <button id="ddup" type="button">Duplicate</button>
+      <button id="dimport" type="button" title="Load a diagram from a JSON file (a board.py build output); one with the same name is replaced">Import</button>
+      <button id="dexport" type="button" title="Save this diagram as a JSON file">Export</button>
+      <input type="file" id="dimportfile" accept=".json,application/json" hidden>
     </div>
     <div class="grp">
       <button id="addnode" type="button">+ Box</button>
@@ -623,6 +626,37 @@ $("addnode").onclick = () => {
 };
 $("dsel").onchange = e => pick(e.target.value);
 $("dnew").onclick = () => { const d = blank("new diagram"); S.list.push(d); pick(d.id); changed(); };
+// Import and Export: a diagram as JSON ({name, nodes, edges}, what board.py
+// build writes), so the board also works away from claude.ai
+$("dimport").onclick = () => $("dimportfile").click();
+$("dimportfile").onchange = async e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  let doc;
+  try { doc = JSON.parse(await f.text()); } catch (err) { setStatus("not imported: the file is not JSON", true); return; }
+  if (!doc || !Array.isArray(doc.nodes) || !Array.isArray(doc.edges)) { setStatus("not imported: no nodes and edges in it", true); return; }
+  const name = String(doc.name || f.name.replace(/\.json$/i, ""));
+  const same = S.list.find(x => x.name === name);
+  const d = { id: same ? same.id : nid("d-"), name, nodes: doc.nodes, edges: doc.edges };
+  if (same) Object.assign(same, d); else S.list.push(d);
+  pick(d.id); changed(); setStatus(same ? "imported, replacing the diagram of that name" : "imported");
+};
+$("dexport").onclick = async () => {
+  if (!S.d) return;
+  const data = JSON.stringify({ name: S.d.name, nodes: S.d.nodes, edges: S.d.edges }, null, 1);
+  const filename = (S.d.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "diagram") + ".json";
+  let dl = null;
+  try { dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null; } catch (err) { dl = null; }
+  if (dl) {
+    try { await dl.save({ filename, data }); setStatus("exported"); }
+    catch (err) { setStatus(err && err.code === "declined" ? "export cancelled" : "not exported: " + ((err && err.code) || "error"), err && err.code !== "declined"); }
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type: "application/json" })); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  setStatus("exported");
+};
 $("ddup").onclick = () => { if (!S.d) return; const d = { id: nid("d-"), ...structuredClone(S.d), name: S.d.name + " (copy)" }; S.list.push(d); pick(d.id); changed(); };
 
 $("side").addEventListener("change", e => {

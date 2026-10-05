@@ -203,8 +203,11 @@ green, and the board is redrawn before the next owner is decided.
    table with filters (only used outside, only public unused outside, count
    tests). Clicking a member shows its docstring and every outside site.
 7. **`objects-board.html`**: a diagram editor, published as an artifact with
-   `capabilities: {db: {}}`. One board per repo, named `<repo> Objects
-   Board` in its `<title>` and heading; the repo's diagrams live in it.
+   `capabilities: {db: {}, downloads: true}`. One board per repo, named
+   `<repo> Objects Board` in its `<title>` and heading; the repo's diagrams
+   live in it. Away from claude.ai it runs alone, keeping diagrams in the
+   browser; Import loads a diagram from JSON (a `board.py build` output; one
+   of the same name is replaced) and Export saves the current one.
    1. **Boxes** have a name, a kind (object, module, process, file, folder,
       external), an origin (library, or app: code built on
       it), members (`+` public,

@@ -526,6 +526,82 @@ def importers(root):
     return out
 
 
+def static_uses(root, objs):
+    """Edges from the source alone, in the run's shape ({from, to, members}):
+    code that names a project class or function it imported (`from m import
+    A` then `A(...)`, `A.x`; `import m` then `m.f`). An import that nothing
+    uses, a re-export, is not a use."""
+    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+
+    def dotted(p):
+        parts = list(p.with_suffix("").parts)
+        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+    by_name = {dotted(p): str(p) for p in files}
+    trees, defined, imports = {}, {}, {}
+    for p in files:
+        try:
+            trees[str(p)] = t = ast.parse(p.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        here = dotted(p)
+        pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
+        defined[str(p)] = {n.name for n in t.body if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+        local = imports[str(p)] = {}           # local name -> (file, name) or (file, None) for a module
+        for n in ast.walk(t):
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    if a.name in by_name:
+                        local[a.asname or a.name] = (by_name[a.name], None)
+            elif isinstance(n, ast.ImportFrom):
+                base = n.module or ""
+                if n.level:
+                    up = pkg.split(".")[: len(pkg.split(".")) - (n.level - 1)]
+                    base = ".".join(up + ([n.module] if n.module else []))
+                for a in n.names:
+                    if f"{base}.{a.name}" in by_name:
+                        local[a.asname or a.name] = (by_name[f"{base}.{a.name}"], None)
+                    elif base in by_name:
+                        local[a.asname or a.name] = (by_name[base], a.name)
+
+    def resolve(f, name, depth=0):
+        """The object id a name of module f stands for, following re-exports."""
+        if name in defined.get(f, ()):
+            oid = f"{f}:{name}"
+            return oid if objs.get(oid, {}).get("kind") == "class" else f
+        if depth < 5 and name in imports.get(f, {}):
+            g, n2 = imports[f][name]
+            return resolve(g, n2, depth + 1) if n2 else None
+        return None
+
+    out = {}
+    for f, t in trees.items():
+        local = imports.get(f, {})
+        if not local:
+            continue
+        owner_of = {}
+        for c in [x for x in ast.walk(t) if isinstance(x, ast.ClassDef)]:
+            for x in ast.walk(c):
+                owner_of[id(x)] = f"{f}:{c.name}"      # innermost class wins: ast.walk is breadth first
+        done = set()
+        for n in ast.walk(t):
+            hit = None
+            if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in local:
+                g, nm = local[n.value.id]
+                done.add(id(n.value))
+                hit = (resolve(g, n.attr), n.attr) if nm is None else (resolve(g, nm), n.attr)
+            elif isinstance(n, ast.Name) and id(n) not in done and n.id in local and local[n.id][1]:
+                g, nm = local[n.id]
+                hit = (resolve(g, nm), nm)
+            if not hit or not hit[0]:
+                continue
+            src = owner_of.get(id(n), f)
+            if src == hit[0]:
+                continue
+            out.setdefault((src, hit[0]), set()).add(hit[1])
+    return [{"from": a, "to": b, "members": sorted(ms)} for (a, b), ms in sorted(out.items())]
+
+
 def concept_rows(map_file):
     """[(concept, [code names])] for each row of the concept map's table
     (Concept | Description | Aliases | Objects | Concerns)."""
@@ -627,7 +703,7 @@ def is_exception(k, facts, seen=()):
     return any(b in ("BaseException", "Exception") or b.endswith(("Error", "Exception", "Warning")) for b in bases)
 
 
-def spec_of(objs, edges, root, concepts=None, data=None):
+def spec_of(objs, edges, root, concepts=None, data=None, static=None):
     """The objects representation of the code as it is. Boxes and placement
     come from the code's structure, never from usage (usage only lists the
     bypasses) and never from the concept map (concepts do not translate
@@ -668,7 +744,13 @@ def spec_of(objs, edges, root, concepts=None, data=None):
     the concepts whose Objects cell names it, and a concept spread over
     several boxes or a box carrying several concepts is flagged
     ("concept: ..."); a concept naming nothing in the code is listed under
-    "unmapped". None of it moves a box."""
+    "unmapped". None of it moves a box.
+
+    Every box is drawn, whether or not an arrow reaches it; a box no call
+    between project objects reached at run time (for a module box: none in
+    its file) is marked unobserved.
+    `static` (from the source, `static_uses`) adds a "uses" arrow for a
+    pair of boxes the run never saw call each other."""
     rootp = Path(root)
     facts = class_facts(root)
     keep = {k for k, o in objs.items() if o["kind"] == "class"
@@ -762,6 +844,16 @@ def spec_of(objs, edges, root, concepts=None, data=None):
         a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
         if a != b:
             pairs.setdefault((a, b), set()).update(e["members"])
+    observed = {box.get(x, x) for e in edges for x in (e["from"], e["to"])} | \
+        {objs[x]["file"] for e in edges for x in (e["from"], e["to"]) if x in objs}   # a module box: by its file
+    run_pairs, static_pairs, extra = set(pairs), set(), []
+    for e in static or ():
+        a, b = box.get(e["from"], e["from"]), box.get(e["to"], e["to"])
+        if a != b and (a, b) not in run_pairs:
+            pairs.setdefault((a, b), set()).update(e["members"])
+            static_pairs.add((a, b))
+            extra.append(e)
+    edges = edges + extra
 
     def top(b):
         while b in parent:
@@ -887,7 +979,7 @@ def spec_of(objs, edges, root, concepts=None, data=None):
             pairs.setdefault((a, b), set()).add(u["name"])
             open_pairs.add((a, b))
 
-    used = {x for pair in pairs for x in pair}
+    used = {x for pair in pairs for x in pair} | set(box.values())
     frontier = set(used)
     while frontier:
         frontier = {parent[x] for x in frontier if x in parent} - used
@@ -907,6 +999,8 @@ def spec_of(objs, edges, root, concepts=None, data=None):
             label = (str(f.parent) + "/") if f.name == "__init__.py" else f.name
             nodes.append({"id": b, "name": label, "kind": "module",
                           "parent": parent.get(b), "note": b})
+        if b not in observed:
+            nodes[-1]["unobserved"] = True
     E = []
     for (a, b), ms in sorted(pairs.items()):
         if within(a, b) or within(b, a):
@@ -923,7 +1017,9 @@ def spec_of(objs, edges, root, concepts=None, data=None):
             named = False
         proof = ({"file": caller_file, "pattern": pattern} if named
                  else {"observed": "called at run time through a subclass, a callback or an injected function"})
-        E.append({"from": a, "to": b, "kind": "calls", "label": label + ("" if named else "  [run time only]"),
+        only_static = (a, b) in static_pairs
+        E.append({"from": a, "to": b, "kind": "uses" if only_static else "calls",
+                  "label": label + ("  [static only]" if only_static else "" if named else "  [run time only]"),
                   "members": ms, "proof": [proof]})
     # processes: a module started as its own process is a box of its own,
     # with an arrow from the code that builds its command line
@@ -1107,13 +1203,13 @@ def spec_of(objs, edges, root, concepts=None, data=None):
             continue
         m = merged.setdefault((a2, b2), {"from": a2, "to": b2, "kinds": [], "labels": [], "proof": []})
         m["kinds"].append(e["kind"])
-        for part in (x.strip() for x in e["label"].replace("  [run time only]", "").split(" · ")):
+        for part in (x.strip() for x in e["label"].replace("  [run time only]", "").replace("  [static only]", "").split(" · ")):
             if part and not part.startswith("(+") and part not in m["labels"]:
                 m["labels"].append(part)
         m["proof"] += [p for p in e["proof"] if p not in m["proof"]]
     for (a2, b2), m in sorted(merged.items()):
         labs = m["labels"]
-        keep_edges.append({"from": a2, "to": b2, "kind": next(k for k in ("writes", "spawns", "calls", "reads") if k in m["kinds"]),
+        keep_edges.append({"from": a2, "to": b2, "kind": next(k for k in ("writes", "spawns", "calls", "reads", "uses") if k in m["kinds"]),
                            "label": " · ".join(labs[:3]) + (f"  (+{len(labs) - 3})" if len(labs) > 3 else ""),
                            "proof": m["proof"][:1]})
     E[:] = keep_edges
@@ -1285,7 +1381,7 @@ def main():
     json.dump({"root": a.root, "pytest_exit": int(rc), "objects": objs, "edges": edges},
               open(a.out, "w"), indent=1)
     if a.spec:
-        spec = spec_of(objs, edges, a.root, a.concepts, a.data)
+        spec = spec_of(objs, edges, a.root, a.concepts, a.data, static_uses(a.root, objs))
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
             print(f"bypassed: {m['module']} ({m['why']})", file=sys.stderr)

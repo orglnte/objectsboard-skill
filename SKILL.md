@@ -51,8 +51,11 @@ the code **as it is**: `tools/trace_objects.py --spec ...`, with
 `--data <Resources table>` or `--concepts <concept map>` when there is one.
 Boxes are the classes with behaviour of their own (a public
 method; not a value class such as a dataclass, NamedTuple or Enum, and not
-an exception), one arrow per pair of boxes that call each other, modules no
-class holds as module boxes of their own, and the **resources (data)**: the files,
+an exception), every box drawn even when no arrow reaches it, one arrow
+per pair of boxes that call each other at run time (a dotted "uses" arrow
+when only the source names the other box: an import or a name, no call
+seen), a box no call between project objects reached at run time marked
+UNOBSERVED, modules no class holds as module boxes of their own, and the **resources (data)**: the files,
 folders and external systems the code keeps data in or drives, named with
 the code patterns that reach them in a Resources table (Resource | Kind |
 Owner | Reached by), in its own file (`--data`) or in the concept map.

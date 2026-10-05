@@ -52,7 +52,7 @@ simplify  one box per top-level owner, one arrow per pair: labels merged
 import argparse, json, math, pathlib, re, shutil, subprocess, sys
 
 PAD, HEAD, LINE, CPAD = 10, 34, 17, 14
-KIND_RANK = ["writes", "spawns", "calls", "reads"]
+KIND_RANK = ["writes", "spawns", "calls", "reads", "uses"]
 
 
 # --- geometry: the board page's own box sizes --------------------------------
@@ -202,6 +202,8 @@ def build(spec, keep, stamp, fresh=False):
              "collapsed": n.get("collapsed", False), "x": 0, "y": 0}
         if n.get("flag"):
             m["flag"] = n["flag"]
+        if n.get("unobserved"):
+            m["unobserved"] = True
         if n["id"] in old and old[n["id"]].get("parent") == n.get("parent"):
             for k in ("x", "y", "w", "h", "collapsed"):
                 if k in old[n["id"]]:

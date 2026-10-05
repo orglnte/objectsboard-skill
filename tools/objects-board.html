@@ -9,7 +9,7 @@
     --k-object: #2563a6; --k-object-fill: #e6eef8; --k-module: #5b6b7a; --k-module-fill: #f2f4f6;
     --k-file: #7c5a12; --k-file-fill: #faf3e2; --k-process: #6a4fa3; --k-process-fill: #f1edf9;
     --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6;
-    --e-calls: #2563a6; --e-reads: #2f8a57; --e-writes: #c2410c; --e-spawns: #6a4fa3;
+    --e-calls: #2563a6; --e-reads: #2f8a57; --e-writes: #c2410c; --e-spawns: #6a4fa3; --e-uses: #8a939c;
     --exp: #b45309; --warn: #d4261c; --amber: #b7791f; --grey: #b9c0c7; --grey-fill: #eef0f2;
     --sans: "Fira Sans", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
     --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -21,7 +21,7 @@
       --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
       --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
       --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
-      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d; --grey: #4b535b; --grey-fill: #1d2125;
+      --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --e-uses: #8b949e; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d; --grey: #4b535b; --grey-fill: #1d2125;
       color-scheme: dark;
     }
   }
@@ -31,7 +31,7 @@
     --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
     --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
     --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
-    --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d;
+    --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --e-uses: #8b949e; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -94,6 +94,8 @@
   .node text.priv { fill: #c2410c; }
   .node text.note { font-family: var(--sans); font-size: 11px; fill: var(--ink-3); font-style: italic; }
   .node .exp { fill: var(--exp); font-size: 9.5px; }
+  .node.unobserved rect.box { stroke-dasharray: 3 3; }
+  .node .unrun { fill: var(--ink-3); font-size: 9.5px; }
   .node.flagged rect.box { stroke: var(--warn) !important; stroke-width: 2.4; }
   .node text.flag { fill: var(--warn); font-family: var(--sans); font-size: 11px; font-weight: 600; }
   .edge.flagged path:not(.hit) { stroke: var(--warn) !important; stroke-width: 2; }
@@ -167,9 +169,10 @@ const EKINDS = [
   { k: "reads", label: "reads", dash: "5 4" },
   { k: "writes", label: "writes", dash: "" },
   { k: "spawns", label: "spawns", dash: "2 4" },
+  { k: "uses", label: "uses", dash: "1 3" },
 ];
 // what each chip means, shown as its tooltip
-const ELABEL = { calls: "calls", reads: "reads data", writes: "writes data", spawns: "starts a process" };
+const ELABEL = { calls: "calls", reads: "reads data", writes: "writes data", spawns: "starts a process", uses: "static only" };
 const BLABEL = { object: "class (owner)", module: "module", process: "process", file: "file (data)", folder: "folder (data)", external: "external system" };
 const FLAGS = [
   { k: "red", label: "private access", c: "var(--warn)", mean: "a name starting with an underscore reached from outside its module, class or package" },
@@ -180,6 +183,7 @@ const EMEAN = {
   reads: "reads data. Amber when it reaches another owner's data directly",
   writes: "writes data. Amber when the data has several writers",
   spawns: "starts a separate process",
+  uses: "names a class or function of the other box in its source; no call between the two was seen at run time",
 };
 const BMEAN = {
   object: "a class with behaviour of its own: an owner. A box inside another is owned by it",
@@ -262,7 +266,7 @@ function render() {
   for (const n of order) {
     const b = L[n.id], c = kindColors(n.kind), cont = children(n.id).length > 0;
     const dim = S.sel && S.edgeOnlySel === false && rel.size && !rel.has(n.id) && n.id !== S.sel && !isDesc(S.sel, n.id, B) && !isDesc(n.id, S.sel, B) && !cont;
-    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag), S.greyKinds.has(n.kind) ? "grey" : ""].join(" ");
+    const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag), S.greyKinds.has(n.kind) ? "grey" : "", n.unobserved ? "unobserved" : ""].join(" ");
     const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : "";
     g += `<g class="${cls}" data-n="${esc(n.id)}" transform="translate(${b.x},${b.y})">
       ${n.id === S.sel ? `<rect class="selring" x="-5" y="-5" width="${b.w + 10}" height="${b.h + 10}" rx="10"></rect>` : ""}
@@ -271,6 +275,7 @@ function render() {
     g += `<text class="title" x="${ox + PAD}" y="${oy + 21}">${n.flag ? "⚠ " : ""}${esc(n.name)}</text>`;
     g += `<text class="kind" x="${b.w - PAD}" y="${oy + 14}" text-anchor="end">${esc(n.kind.toUpperCase())}${n.collapsed && n.members.length ? " +" + n.members.length : ""}</text>`;
     if (n.origin === "app") g += `<text class="exp" x="${b.w - PAD}" y="${oy + 27}" text-anchor="end">APP</text>`;
+    else if (n.unobserved) g += `<text class="unrun" x="${b.w - PAD}" y="${oy + 27}" text-anchor="end">UNOBSERVED</text>`;
     let y = oy + HEAD + 10;
     if (!n.collapsed) {
       for (const m of n.members) {
@@ -353,7 +358,7 @@ function side() {
     const parents = S.d.nodes.filter(x => x.id !== n.id && !isDesc(x.id, n.id, B)).sort((a, b) => a.name.localeCompare(b.name));
     const outs = S.d.edges.filter(e => e.from === n.id), ins = S.d.edges.filter(e => e.to === n.id);
     const li = (e, other) => `<li data-goe="${esc(e.id)}"><span class="sw" style="--c:var(--e-${e.kind});--f:transparent"></span><b>${esc(e.kind)}</b> ${esc(B[other]?.name)}${e.label ? " · " + esc(e.label) : ""}</li>`;
-    el.innerHTML = `<h2>Box</h2>${n.flag ? `<p class="flagnote ${sev(n.flag)}">⚠ ${esc(n.flag)}</p>` : ""}
+    el.innerHTML = `<h2>Box</h2>${n.flag ? `<p class="flagnote ${sev(n.flag)}">⚠ ${esc(n.flag)}</p>` : ""}${n.unobserved ? `<p style="color:var(--ink-3)">No call between it and another project object was seen at run time.</p>` : ""}
       <div class="f"><label for="nname">Name</label><input type="text" id="nname" value="${esc(n.name)}"></div>
       <div class="row">
         <div class="f"><label for="nkind">Kind</label><select id="nkind">${KINDS.map(k => `<option ${k === n.kind ? "selected" : ""}>${k}</option>`).join("")}</select></div>

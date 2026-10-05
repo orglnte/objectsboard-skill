@@ -464,6 +464,63 @@ def test_a_file_whose_name_matches_none_of_its_classes_has_no_owner_class(tmp_pa
     assert _colours(s)[("lib/app.py:App", "lib/routing.py:Router")] == "blue"
 
 
+STATIC = {
+    "lib/__init__.py": "from lib.api import Api\n",
+    "lib/models.py": "class Spec:\n    name = 'x'\n",
+    "lib/api.py": '''
+from lib.models import Spec
+
+
+class Api:
+    def spec(self):
+        return Spec()
+''',
+    "lib/app.py": '''
+from lib import Api
+
+
+class App:
+    def run(self):
+        return Api().spec()
+''',
+    "lib/cli.py": "def main():\n    return 0\n",
+}
+
+
+def _static_spec(tmp_path, edges):
+    import trace_objects
+    for rel, text in STATIC.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        static = trace_objects.static_uses("lib", objs)
+        return static, trace_objects.spec_of(objs, edges, "lib", static=static)
+    finally:
+        os.chdir(cwd)
+
+
+def test_static_uses_follow_imports_and_re_exports_but_not_a_bare_re_export(tmp_path):
+    static, _ = _static_spec(tmp_path, [])
+    assert {(e["from"], e["to"]): e["members"] for e in static} == {
+        ("lib/api.py:Api", "lib/models.py:Spec"): ["Spec"],
+        ("lib/app.py:App", "lib/api.py:Api"): ["Api"]}            # through lib/__init__.py's re-export
+
+
+def test_every_box_is_drawn_and_a_pair_the_run_never_saw_is_a_static_arrow(tmp_path):
+    _, s = _static_spec(tmp_path, [{"from": "lib/app.py:App", "to": "lib/api.py:Api", "members": ["spec"]}])
+    N = {n["id"]: n for n in s["nodes"]}
+    assert "lib/cli.py" in N and N["lib/cli.py"]["unobserved"]               # no arrow, still drawn
+    assert "unobserved" not in N["lib/api.py:Api"] and "unobserved" not in N["lib/app.py:App"]
+    E = {(e["from"], e["to"]): e for e in s["edges"]}
+    assert E[("lib/app.py:App", "lib/api.py:Api")]["kind"] == "calls"         # seen at run time
+    uses = E[("lib/api.py:Api", "lib/models.py")]                             # Spec is a value class: its module
+    assert (uses["kind"], uses["label"]) == ("uses", "Spec")
+
+
 def _box(i, x, y, parent=None):
     return {"id": i, "name": i, "kind": "object", "members": [], "note": "", "parent": parent, "x": x, "y": y}
 

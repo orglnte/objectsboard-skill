@@ -72,7 +72,9 @@ A private name is matched by name: an attribute counts only when exactly
 one project class or module defines it, and a private method seen at run
 time only when the caller's code names it (a private method handed over as
 a callback is not red). Constant reads are not traced, so a module imported
-only for a constant shows as a flagged box, not as an arrow.
+only for a constant shows as a flagged box, not as an arrow. A pair of boxes
+the run never saw call each other, where one names a class or function of
+the other in its source, gets a dotted "uses" arrow (static only).
 
 It is three established rules seen together:
 
@@ -174,7 +176,11 @@ green, and the board is redrawn before the next owner is decided.
    own Resources table serves when `--data` is not given; `--spec`
    writes the board spec. An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
-   with the observation as proof. `--worklist FILE` writes the refactoring
+   with the observation as proof. A pair the run never saw, where the
+   source names a class or function of the other box (followed through
+   imports and re-exports; an unused import is no use), is a "uses" arrow,
+   static only. Every box is drawn; one no call between project objects
+   reached at run time is marked UNOBSERVED. `--worklist FILE` writes the refactoring
    worklist: private access (red) first, then owner bypasses and shared
    data (amber); one entry per part, the most reached first, with every
    arrow into it and its call sites (file:line, read from the code's
@@ -251,8 +257,9 @@ cannot see is not evidence that nothing is there.
    re-exported through another module (target the re-exporting module too).
 3. **Run-time traces (`trace_uses.py`, `trace_objects.py`):** code the tests never run, so the
    call graph is only as complete as the suite's coverage of the code that
-   uses the target; reads of plain attributes, constants and data objects
-   (no function runs); calls inside another process (the tracer draws a
+   uses the target (`trace_objects.py` falls back to the source for a pair
+   the run missed: a "uses" arrow, and an UNOBSERVED box); reads of plain
+   attributes, constants and data objects (no function runs); calls inside another process (the tracer draws a
    module started as its own process as a process box, from its command
    line, but not the calls it makes). A data-path helper is followed by its
    name only when one function in the project has that name; a generic name

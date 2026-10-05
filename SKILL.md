@@ -62,7 +62,9 @@ folders and external systems the code keeps data in or drives, named with
 the code patterns that reach them in a Resources table (Resource | Kind |
 Owner | Reached by), in its own file (`--data`) or in the concept map.
 Without one, the board has no data boxes. Each box whose code reaches a resource gets an
-arrow to it.
+arrow to it. When the user asks for it in step 0 (`--group-resources`),
+the resources are drawn together in one box, the **resources group**,
+which is not an owner either: each resource keeps its own owner.
 
 **Concepts do not decide the board.** When there is a concept map,
 concepts say what the software is for; encapsulation, abstraction, separation of concerns and ownership are
@@ -161,7 +163,8 @@ Without either, start from the object the user's question is about.
 
 0. Look for `.objectsboard.json` in the repo root first: it holds the
    answers to this step from an earlier session (`{"data": ..., "concepts":
-   ..., "root_owns": ..., "group_unowned": ..., "exclude": [folders],
+   ..., "root_owns": ..., "group_unowned": ..., "group_resources": ...,
+   "exclude": [folders],
    "arrows": "collapsed" | "detailed"}`), and `trace_objects.py` reads it for every option its
    command line leaves out. When it is there, show the saved answers in one
    line, say how to change them (below) and skip the questions. Otherwise,
@@ -170,7 +173,7 @@ Without either, start from the object the user's question is about.
    Resources table only, so the board has data findings; a concept map,
    written by hand or with a concept-design skill, for the concept overlay;
    or neither. Never block on it. Then, in a turn of their own and the last
-   one before tracing, ask two placement questions, both off by default:
+   one before tracing, ask these questions, each off by default:
    1. Does the class named after the root folder own the root package's
       modules (`shop/` -> Shop)? Yes runs the tracer with `--root-owns`.
       Say what yes means: in a flat repo with one package, that class then
@@ -180,7 +183,11 @@ Without either, start from the object the user's question is about.
       unowned group (not an owner; titled with the deepest folder they
       share)? Yes runs it with `--group-unowned`; no leaves each module
       box on its own.
-   3. Any folders to leave out (vendored code, generated code, examples)?
+   3. Should the resources (data: files, folders, external systems) be
+      drawn together in one box, the resources group (not an owner; each
+      resource keeps its own owner or writers)? Yes runs it with
+      `--group-resources`; no leaves each resource box on its own.
+   4. Any folders to leave out (vendored code, generated code, examples)?
       They go in `exclude` (`--exclude DIR`, paths from the repo root) and
       are left out of every scan: no box, no arrow, no call traced.
    After the questions, write the answers to `.objectsboard.json` in the

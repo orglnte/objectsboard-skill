@@ -571,6 +571,38 @@ def test_the_simplified_view_keeps_the_unowned_groups_members_as_boxes():
     assert ("lib/u0.py:U0", "lib/errors.py") in {(e["from"], e["to"]) for e in v["edges"]}
 
 
+def _resources_spec():
+    nodes = [{"id": f"lib/{c.lower()}.py:{c}", "name": c, "kind": "object", "parent": None, "note": ""}
+             for c in ("Store", "Report")]
+    nodes += [{"id": "resource:out/", "name": "out/", "kind": "folder", "parent": None,
+               "note": "no single owner: written by Store, Report"},
+              {"id": "resource:db.json", "name": "db.json", "kind": "file", "parent": None, "note": "owner: Store"}]
+    edges = [{"from": "lib/store.py:Store", "to": "resource:out/", "kind": "writes", "label": "out/",
+              "flag": "shared: written by Store, Report"},
+             {"from": "lib/report.py:Report", "to": "resource:out/", "kind": "writes", "label": "out/",
+              "flag": "shared: written by Store, Report"},
+             {"from": "lib/store.py:Store", "to": "resource:db.json", "kind": "writes", "label": "db.json"}]
+    for e in edges:
+        e["proof"] = []
+    return {"name": "x", "nodes": nodes, "edges": edges}
+
+
+def test_the_resources_group_draws_the_data_together_and_owns_none_of_it():
+    import trace_objects
+    s = _resources_spec()
+    before = trace_objects.worklist(s)
+    trace_objects.group_resources(s["nodes"])
+    P = {n["id"]: n.get("parent") for n in s["nodes"]}
+    assert P["resource:out/"] == P["resource:db.json"] == "resources:group"
+    assert P["lib/store.py:Store"] is None                                  # code stays where it is
+    assert trace_objects.worklist(s) == before                              # each resource keeps its owner or writers
+    ids = {n["id"] for n in board.simplify(s)["nodes"]}
+    assert {"resource:out/", "resource:db.json", "resources:group"} <= ids  # the members stay boxes
+    code = [n for n in _resources_spec()["nodes"] if not n["id"].startswith("resource:")]
+    trace_objects.group_resources(code)
+    assert not any(n["kind"] == "resources" for n in code)                  # no data: no group
+
+
 FLAT = {
     "lib/__init__.py": "from lib.app import Lib\n",
     "lib/app.py": "from lib.util import norm\n\n\nclass Lib:\n    def run(self, p):\n        return norm(p)\n",
@@ -624,8 +656,10 @@ def test_saved_answers_fill_the_options_the_command_line_leaves_out(tmp_path):
     assert trace_objects.load_prefs(str(prefs)) == {}                    # none saved
     prefs.write_text(json.dumps({"root_owns": True, "group_unowned": True, "data": "DATA.md", "exclude": ["lib/vendor"]}))
     saved = trace_objects.load_prefs(str(prefs))
-    cli = argparse.Namespace(root_owns=None, group_unowned=False, data=None, concepts=None, exclude=None)
+    cli = argparse.Namespace(root_owns=None, group_unowned=False, group_resources=None, data=None, concepts=None,
+                             exclude=None)
     assert trace_objects.options(cli, saved) == {"root_owns": True, "group_unowned": False,   # the flag wins
+                                                 "group_resources": False,                     # off unless asked
                                                  "data": "DATA.md", "concepts": None, "exclude": ["lib/vendor"]}
     cli.exclude = ["lib/gen"]
     assert trace_objects.options(cli, saved)["exclude"] == ["lib/gen"]

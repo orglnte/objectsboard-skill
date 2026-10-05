@@ -185,7 +185,10 @@ green, and the board is redrawn before the next owner is decided.
    top-level modules no class owns go in the unowned group (box kind
    `unowned`, titled with the deepest folder they share): drawn together,
    never an owner; findings, the worklist and the simplified
-   view keep each member as a box of its own. `--worklist FILE` writes the refactoring
+   view keep each member as a box of its own. With `--group-resources`,
+   the resources go in one box of kind `resources`, the same way: drawn
+   together, never an owner, each resource keeping its own owner or
+   writers. `--worklist FILE` writes the refactoring
    worklist: private access (red) first, then owner bypasses and shared
    data (amber); one entry per part, the most reached first, with every
    arrow into it and its call sites (file:line, read from the code's

@@ -46,6 +46,7 @@ from pathlib import Path
 
 
 EXCLUDE = []                                  # folders left out of every scan (set by main or a caller)
+GROUPS = ("unowned", "resources")             # box kinds that draw boxes together and own nothing
 
 
 def py_files(root):
@@ -819,7 +820,8 @@ def is_exception(k, facts, seen=()):
     return any(b in ("BaseException", "Exception") or b.endswith(("Error", "Exception", "Warning")) for b in bases)
 
 
-def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=False, group=False):
+def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=False, group=False,
+            group_data=False):
     """The objects representation of the code as it is. Boxes and placement
     come from the code's structure, never from usage (usage only lists the
     bypasses) and never from the concept map (concepts do not translate
@@ -868,7 +870,8 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
     its file) is marked unobserved.
     `static` (from the source, `static_uses`) adds a "uses" arrow for a
     pair of boxes the run never saw call each other. `group` draws the
-    top-level modules no class owns in the unowned group."""
+    top-level modules no class owns in the unowned group; `group_data`
+    draws the resources (data) together in one box."""
     rootp = Path(root)
     facts = class_facts(root)
     keep = {k for k, o in objs.items() if o["kind"] == "class"
@@ -1331,6 +1334,8 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
     E[:] = keep_edges
     if group:
         group_unowned(nodes)
+    if group_data:
+        group_resources(nodes)
     unmapped = overlay(concepts, objs, box, nodes, top) if concepts else []
     return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)],
             "unmapped": unmapped}
@@ -1349,6 +1354,19 @@ def group_unowned(nodes):
                   "note": "modules no class owns: drawn together, not owned"})
     for n in members:
         n["parent"] = "unowned:group"
+
+
+def group_resources(nodes):
+    """Put the resources (data: files, folders, external systems) in one
+    box of kind "resources". Like the unowned group it owns nothing: each
+    resource keeps its own owner, or its several writers."""
+    members = [n for n in nodes if n["id"].startswith("resource:") and not n.get("parent")]
+    if not members:
+        return
+    nodes.append({"id": "resources:group", "name": "resources (data)", "kind": "resources", "parent": None,
+                  "note": "the data the code keeps: drawn together, not owned"})
+    for n in members:
+        n["parent"] = "resources:group"
 
 
 def overlay(concepts, objs, box, nodes, top):
@@ -1401,8 +1419,8 @@ def worklist(spec):
     reaches it and its call sites (file:line)."""
     N = {n["id"]: n for n in spec["nodes"]}
 
-    def top(i):                               # the unowned group is no owner
-        while N.get(i, {}).get("parent") and N[N[i]["parent"]].get("kind") != "unowned":
+    def top(i):                               # a group is no owner
+        while N.get(i, {}).get("parent") and N[N[i]["parent"]].get("kind") not in GROUPS:
             i = N[i]["parent"]
         return i
 
@@ -1492,7 +1510,8 @@ PREFS = ".objectsboard.json"
 
 def load_prefs(path=PREFS):
     """The step 0 answers saved in the repo root ({"root_owns", "group_unowned",
-    "data", "concepts", "exclude", "arrows"}); {} when there is none."""
+    "group_resources", "data", "concepts", "exclude", "arrows"}); {} when
+    there is none."""
     try:
         with open(path) as f:
             prefs = json.load(f)
@@ -1511,6 +1530,7 @@ def options(a, prefs):
     pick = lambda flag, key, default: flag if flag is not None else prefs.get(key, default)
     return {"root_owns": bool(pick(a.root_owns, "root_owns", False)),
             "group_unowned": bool(pick(a.group_unowned, "group_unowned", False)),
+            "group_resources": bool(pick(a.group_resources, "group_resources", False)),
             "data": pick(a.data, "data", None), "concepts": pick(a.concepts, "concepts", None),
             "exclude": list(pick(a.exclude, "exclude", []))}
 
@@ -1531,6 +1551,9 @@ def main():
     ap.add_argument("--group-unowned", action=argparse.BooleanOptionalAction,
                     help="draw the top-level modules no class owns together in one box, the unowned group "
                          "(it owns nothing); by default each stands alone")
+    ap.add_argument("--group-resources", action=argparse.BooleanOptionalAction,
+                    help="draw the resources (data) together in one box, which owns nothing; by default each "
+                         "stands alone")
     ap.add_argument("--exclude", action="append", metavar="DIR",
                     help="a folder to leave out of every scan (repeatable; a path from the current folder, "
                          "such as pkg/vendor)")
@@ -1554,7 +1577,7 @@ def main():
               open(a.out, "w"), indent=1)
     if a.spec:
         spec = spec_of(objs, edges, a.root, opt["concepts"], opt["data"], static_uses(a.root, objs),
-                       opt["root_owns"], opt["group_unowned"])
+                       opt["root_owns"], opt["group_unowned"], opt["group_resources"])
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
             print(f"bypassed: {m['module']} ({m['why']})", file=sys.stderr)

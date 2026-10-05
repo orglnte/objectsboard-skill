@@ -2,10 +2,12 @@
 
 For one object at a time: what it really offers, who reaches it and why,
 and what goes around it; for the whole codebase, the objects as the code
-has them with the concepts laid over them; then a board where the user
-decides the next change. The tools are in `tools/`.
+has them, with a concept map laid over them when there is one; then a
+board where the user decides the next change. The tools are in `tools/`.
 
 ## Concepts and objects
+
+A concept map is optional; without one, skip this section.
 
 1. The concept map (concept | description | aliases | objects | concerns)
    says what the software is for. It does not decide encapsulation,
@@ -84,11 +86,11 @@ It is three established rules seen together:
    through them to their internals. Red and amber arrows are its violations
    at module level.
 
-What this skill adds: placement comes from structure and the concept map,
-never from usage, so the boundary is declared, not inferred from who
-happens to call what; usage only marks the crossings. Where the map, the
-folder and the usage name different owners, the box is a doubt for the user
-to settle in the map.
+What this skill adds: placement comes from the code's structure, never
+from usage or concepts, so the boundary is declared, not inferred from who
+happens to call what; usage only marks the crossings. Where the structure
+and the usage name different owners (an owner that never uses its module),
+the box is a doubt for the user to settle.
 
 ## Why one object at a time
 
@@ -163,9 +165,10 @@ decided.
 2. **`file_contracts.py`**: every quoted mention of the given file names,
    with two lines of context.
 3. **`trace_objects.py`**: the objects representation of a whole codebase
-   (view 6) from the test suite's run and the source: `--concepts` names
-   the concept map, laid over the boxes and the source of the data's
-   patterns (its Resources table); `--spec`
+   (view 6) from the test suite's run and the source: `--data` names a
+   Resources table (the data and the code patterns that reach it);
+   `--concepts`, optional, names a concept map laid over the boxes, whose
+   own Resources table serves when `--data` is not given; `--spec`
    writes the board spec. An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
    with the observation as proof. `--worklist FILE` writes the refactoring
@@ -302,16 +305,16 @@ cannot see is not evidence that nothing is there.
 6. **Whole codebase (the objects representation):** the code as it is.
    Classes with behaviour of their own as boxes, one arrow per pair,
    modules no class holds as external boxes, and the resources (data)
-   named in the map's Resources table, with an arrow from every box whose
+   named in a Resources table (`--data`, or the concept map's), with an arrow from every box whose
    code reaches one directly (a bypass unless it is the data's only writer;
    several writers are flagged as shared). Placement from the code's
    structure only: the file's class, composition (a class kept as `self.x`,
    built directly or by a project factory function) and subclassing, then
    the package's class (named after its folder, never the root), or a
    classless package's own `__init__` module; neither
-   usage nor the concept map moves a box. The concepts are an overlay:
-   labels, and flags for a concept spread over several owners or a box
-   carrying several. Usage colours the arrows (see Arrow colours): red for
+   usage nor the concept map moves a box. With a concept map, the concepts
+   are an overlay: labels, and flags for a concept spread over several
+   owners or a box carrying several. Usage colours the arrows (see Arrow colours): red for
    private access, amber for an owner bypass or shared data; amber also
    marks the doubts (an owner that never uses its module).
    No box around everything, no folder boxes, never the module import

@@ -658,3 +658,23 @@ def test_a_package_without_a_class_holds_its_modules_and_a_kept_callback_is_not_
     N = {n["id"]: n for n in s["nodes"]}
     assert N["lib/cmd/_out.py"]["parent"] == "lib/cmd/__init__.py"      # the package's own module holds it
     assert all(not e.get("flag", "").startswith("private:") for e in s["edges"])   # Pad calls what it was handed
+
+
+def test_data_without_a_concept_map(tmp_path):
+    import trace_objects
+    for rel, text in REPR.items():
+        q = tmp_path / rel
+        q.parent.mkdir(parents=True, exist_ok=True)
+        q.write_text(text)
+    (tmp_path / "DATA.md").write_text(MAP[MAP.index("| Resource |"):])
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        s = trace_objects.spec_of(objs, [{"from": "lib/report/report.py:Report", "to": "lib/shapes.py:Shape",
+                                          "members": ["area"]}], "lib", data="DATA.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["resource:out/"]["note"] == "owner: Report"                    # the data, with no concept map
+    assert not any("concepts" in n for n in s["nodes"]) and s["unmapped"] == []

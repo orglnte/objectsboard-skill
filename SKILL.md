@@ -1,17 +1,20 @@
 ---
 name: objectsboard
-description: Concepts, separation of concerns, encapsulation and abstraction — draw a codebase's objects as the code has them, overlay its concepts, and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact), and refactor round by round: the user decides each next step on the board, the code changes, the board is redrawn from the code. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
+description: Separation of concerns, encapsulation and abstraction — draw a codebase's objects as the code has them, optionally overlay its concepts, and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact), and refactor round by round: the user decides each next step on the board, the code changes, the board is redrawn from the code. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
 ---
 
 # Objectsboard
 
-Concepts say what the software is for; objects are the code that delivers
-them. A concept does not translate into a class by itself: encapsulation,
-abstraction, separation of concerns and ownership are design, and the user
-makes the design. This skill draws the objects as the code has them, lays
-the concepts over them, shows what goes around each owner, and supports
-the design round by round: the user picks the next change, the code
-changes, the board is redrawn from the code.
+This skill draws a codebase's objects as the code has them, shows what
+goes around each owner, and supports the design round by round: the user
+picks the next change, the code changes, the board is redrawn from the code.
+Encapsulation, abstraction, separation of concerns and ownership are
+design, and the user makes the design.
+
+A concept map is optional. Concepts say what the software is for; laid over
+the objects they inform the design, but a concept does not translate into a
+class by itself. Without a map the board shows the objects, the data and
+the arrows; with one it also labels the boxes and flags concept mismatches.
 
 **Python only for now:** the extractor parses Python source. The method and
 the board work for any language, but the interface and its uses would have
@@ -19,17 +22,16 @@ to be gathered by hand.
 
 It covers:
 
-1. **Concepts:** what each unit of function is for and its aliases, laid
-   over the objects as an overlay that informs the design.
-2. **Separation of concerns:** one concept per object; a concept spread over
-   several objects, or an object carrying several concepts, is a finding.
-3. **Encapsulation:** an object's state and files reached only through it.
-4. **Abstraction:** an interface sized to what its callers use; public
+1. **Encapsulation:** an object's state and files reached only through it.
+2. **Abstraction:** an interface sized to what its callers use; public
    members nobody uses outside, and private ones reached from outside, are
    findings.
-5. **Architectural review:** patterns and antipatterns found in the code,
-   and dark concepts (a concept whose effect surprises its user, or that
-   acts silently) and colliding names.
+3. **Separation of concerns:** with a concept map, one concept per object;
+   a concept spread over several objects, or an object carrying several
+   concepts, is a finding.
+4. **Architectural review:** patterns and antipatterns found in the code,
+   and, with a concept map, dark concepts (a concept whose effect surprises
+   its user, or that acts silently) and colliding names.
 
 ## Requirements
 
@@ -45,25 +47,26 @@ It covers:
 ## The whole codebase: the objects representation (Python)
 
 When the user wants to see everything, draw the objects representation of
-the code **as it is**: `tools/trace_objects.py --concepts <concept map>
---spec ...`. Boxes are the classes with behaviour of their own (a public
+the code **as it is**: `tools/trace_objects.py --spec ...`, with
+`--data <Resources table>` or `--concepts <concept map>` when there is one. Boxes are the classes with behaviour of their own (a public
 method; not a value class such as a dataclass, NamedTuple or Enum, and not
 an exception), one arrow per pair of boxes that call each other, modules no
 class holds as external boxes, and the **resources (data)**: the files,
 folders and external systems the code keeps data in or drives, named with
-the code patterns that reach them in the map's Resources table (Resource |
-Kind | Owner | Reached by). Each box whose code reaches a resource gets an
+the code patterns that reach them in a Resources table (Resource | Kind |
+Owner | Reached by), in its own file (`--data`) or in the concept map.
+Without one, the board has no data boxes. Each box whose code reaches a resource gets an
 arrow to it.
 
-**Concepts do not decide the board.** Concepts say what the software is
-for; encapsulation, abstraction, separation of concerns and ownership are
+**Concepts do not decide the board.** When there is a concept map,
+concepts say what the software is for; encapsulation, abstraction, separation of concerns and ownership are
 design, and the person makes the design. A concept does not translate into
 a class by itself. On the board the concept map is an **overlay**: each box
 is labelled with the concepts whose Objects cell names it, and mismatches
 are flagged (a concept spread over several owners, a box carrying several
 concepts; a concept naming nothing in the code is listed). They inform the
-design; they never move a box. The map's Owner column is documentation,
-not an input.
+design; they never move a box. The Resources table's Owner column is
+documentation, not an input.
 
 **Placement comes from the code's structure, never from usage or concepts**
 (the first rule that matches wins):
@@ -112,25 +115,31 @@ makes it, coloured by the table in METHOD.md (Arrow colours):
 `trace_objects.py --worklist FILE` lists them, red first, the most reached
 part first, each with its call sites (file:line). A flagged box is a part
 called directly from outside its owner, or a module its owner never uses
-while exactly one other class does (a doubt).
-
-3. **Concept findings** (the overlay above), flagged in place.
-4. Never draw one box around everything, folder boxes, or the module import
-   graph as the whole-codebase board.
+while exactly one other class does (a doubt). Concept findings, with a
+concept map, are flagged in place. Never draw one box around everything,
+folder boxes, or the module import graph as the whole-codebase board.
 
 **The design is iterative, not one step to a target.** The board is always
 the current code. Each round the person picks the next change, informed by
-the worklist and the concept findings; the code changes in one commit,
+the worklist (and the concept findings, with a map); the code changes in one commit,
 suites green; the board is traced and redrawn from the code; the next round
 starts from there.
 
 ## Input
 
-A concept map: one row per concept with a short description and the objects
-it should rest on. Write one (`docs/CONCEPTS-<repo>.md`: concept | description
-| aliases | objects | concerns), or produce it with a concept-design skill such
-as [concept-skills](https://github.com/ontology-of-everything/concept-skills).
-Without a map, start from the object the user's question is about.
+The code and its test suite. Optional:
+
+1. A Resources table (Resource | Kind | Owner | Reached by): the data the
+   code keeps in files, folders and external systems, and the code patterns
+   that reach each one (`--data`).
+2. A concept map: one row per concept with a short description and the
+   objects it should rest on (`docs/CONCEPTS-<repo>.md`: concept |
+   description | aliases | objects | concerns), its Resources table
+   included, written by hand or produced with a concept-design skill such
+   as [concept-skills](https://github.com/ontology-of-everything/concept-skills)
+   (`--concepts`).
+
+Without either, start from the object the user's question is about.
 
 ## Steps
 

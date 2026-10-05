@@ -23,7 +23,8 @@ re-run, take the next. The colours are METHOD.md's (Arrow colours).
 
 --spec writes a board spec for board.py, the code as it is: one box per
 class with behaviour of its own, placed by the code's structure (see
-spec_of); --concepts lays the concept map over it and names the data; the
+spec_of); --concepts, optional, lays a concept map over it; --data (or the
+concept map's own Resources table) names the data; the
 spec also lists each owned part used from outside its owner, with those
 users (the bypasses). No folder boxes and no box around everything; one
 arrow per pair of boxes, labelled with the members called, each with a
@@ -515,7 +516,7 @@ def is_exception(k, facts, seen=()):
     return any(b in ("BaseException", "Exception") or b.endswith(("Error", "Exception", "Warning")) for b in bases)
 
 
-def spec_of(objs, edges, root, concepts=None):
+def spec_of(objs, edges, root, concepts=None, data=None):
     """The objects representation of the code as it is. Boxes and placement
     come from the code's structure, never from usage (usage only lists the
     bypasses) and never from the concept map (concepts do not translate
@@ -544,7 +545,8 @@ def spec_of(objs, edges, root, concepts=None):
        reached from outside its Python container is private access (red).
        One arrow per pair of boxes.
 
-    Data (the map's resources table names it and how code reaches it): its
+    Data (a Resources table names it and how code reaches it: `data`, or the
+    concept map's own table): its
     owner is its only writer in the code (a write anywhere in the function
     that reaches it); a reach from anyone else is an
     owner bypass; several writers mean no single owner, and each write is
@@ -842,7 +844,7 @@ def spec_of(objs, edges, root, concepts=None):
     # resources (data): one box each, an arrow from every box whose code
     # reaches it directly; its owner is its only writer, and a reach from
     # anyone else is a bypass
-    res_rows = resource_rows(concepts) if concepts else []
+    res_rows = resource_rows(data or concepts) if (data or concepts) else []
     if res_rows:
         N = {n["id"]: n for n in nodes}
         hits = {}
@@ -1112,7 +1114,10 @@ def main():
     ap.add_argument("--root", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--spec")
-    ap.add_argument("--concepts", help="the concept map (markdown): laid over the boxes, and its Resources table names the data")
+    ap.add_argument("--concepts", help="optional: the concept map (markdown), laid over the boxes; its Resources table, "
+                                       "if any, names the data")
+    ap.add_argument("--data", help="optional: a markdown Resources table (Resource | Kind | Owner | Reached by) naming "
+                                   "the data, without a concept map")
     ap.add_argument("--tests-dir", default="tests")
     ap.add_argument("--worklist", metavar="FILE",
                     help="with --spec: write the bypasses as a refactoring worklist, the most bypassed part first")
@@ -1130,7 +1135,7 @@ def main():
     json.dump({"root": a.root, "pytest_exit": int(rc), "objects": objs, "edges": edges},
               open(a.out, "w"), indent=1)
     if a.spec:
-        spec = spec_of(objs, edges, a.root, a.concepts)
+        spec = spec_of(objs, edges, a.root, a.concepts, a.data)
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
             print(f"bypassed: {m['module']} ({m['why']})", file=sys.stderr)

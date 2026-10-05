@@ -544,8 +544,10 @@ def merge(edges, key, prefix):
         a, b = key(e["from"]), key(e["to"])
         if a == b:
             continue
-        v = merged.setdefault((a, b), {"kinds": [], "labels": []})
+        v = merged.setdefault((a, b), {"kinds": [], "labels": [], "flags": []})
         v["kinds"].append(e["kind"])
+        if e.get("flag") and e["flag"] not in v["flags"]:
+            v["flags"].append(e["flag"])
         for part in (x.strip() for x in (e.get("label") or "").split(" · ")):
             if part and part not in v["labels"]:
                 v["labels"].append(part)
@@ -554,6 +556,8 @@ def merge(edges, key, prefix):
         lab = " · ".join(v["labels"][:3]) + (f"  (+{len(v['labels']) - 3})" if len(v["labels"]) > 3 else "")
         out.append({"id": f"{prefix}{i + 1}", "from": a, "to": b,
                     "kind": next(k for k in KIND_RANK if k in v["kinds"]), "label": lab})
+        if v["flags"]:                        # a merged pair keeps every finding, private access first
+            out[-1]["flag"] = " — ".join(sorted(v["flags"], key=lambda f: not f.startswith("private:")))
     return out
 
 

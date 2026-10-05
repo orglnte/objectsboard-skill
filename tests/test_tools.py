@@ -176,6 +176,16 @@ def test_collapse_keeps_the_boxes_and_merges_arrows_per_pair():
         ("a", "b", "calls", "get · config.json"), ("b", "a", "calls", "notify")]
 
 
+def test_collapse_keeps_each_pairs_flags_red_first():
+    d = {"name": "x", "nodes": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}, {"id": "c", "name": "C"}],
+         "edges": [{"from": "a", "to": "b", "kind": "calls", "label": "get"},
+                   {"from": "a", "to": "b", "kind": "calls", "label": "x", "flag": "owner bypass: reaches X directly"},
+                   {"from": "a", "to": "b", "kind": "calls", "label": "_y", "flag": "private: reaches _y of b.py"},
+                   {"from": "a", "to": "c", "kind": "uses", "label": "C"}]}
+    flags = {(e["from"], e["to"]): e.get("flag") for e in board.collapse(d)["edges"]}
+    assert flags == {("a", "b"): "private: reaches _y of b.py — owner bypass: reaches X directly", ("a", "c"): None}
+
+
 def test_trace_objects_records_calls_between_objects_not_within_one(app):
     out, spec = app / "objects.json", app / "spec.json"
     subprocess.run([sys.executable, str(TOOLS / "trace_objects.py"), "--root", "app", "--out", str(out),

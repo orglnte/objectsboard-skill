@@ -957,3 +957,82 @@ def test_a_path_the_owners_public_helper_hands_out_is_reached_through_the_owner(
     flags = {e["from"]: e.get("flag", "") for e in s["edges"] if e["to"] == "resource:out/"}
     assert flags["lib/report.py"] == ""                                  # the path Store hands out
     assert flags["lib/peek.py"].startswith("owner bypass")               # the path built by hand
+
+
+SAME_NAMES = {
+    "lib/__init__.py": "",
+    "lib/forms/__init__.py": "",
+    "lib/forms/fields.py": "class Field:\n    def clean(self):\n        return 1\n",
+    "lib/db/__init__.py": "",
+    "lib/db/fields.py": "class Field:\n    def run(self):\n        return 1\n",
+    "lib/db/table.py": '''
+from .fields import Field
+
+
+class Table:
+    def __init__(self):
+        self.field = Field()
+
+    def rows(self):
+        return self.field.run()
+''',
+    "lib/auth.py": '''
+class Guest:
+    def name(self):
+        return "guest"
+
+
+def get_user():
+    return Guest()
+''',
+    "lib/views.py": '''
+class Confirm:
+    def __init__(self):
+        self.user = self.get_user()
+
+    def get_user(self):
+        return 1
+
+    def show(self):
+        return self.user
+''',
+    "lib/a/__init__.py": "",
+    "lib/a/base.py": "class Node:\n    def render(self):\n        return 1\n",
+    "lib/a/text.py": "from .base import Node\n\n\nclass Text(Node):\n    def words(self):\n        return 1\n",
+    "lib/b/__init__.py": "",
+    "lib/b/base.py": "class Node:\n    def walk(self):\n        return 1\n",
+}
+
+
+def _same_names(tmp_path):
+    import trace_objects
+    for rel, text in SAME_NAMES.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        return trace_objects.owners("lib", objs), trace_objects.spec_of(objs, [], "lib")
+    finally:
+        os.chdir(cwd)
+
+
+def test_a_kept_class_is_the_one_the_keepers_file_imports_not_any_of_that_name(tmp_path):
+    kept, _ = _same_names(tmp_path)
+    assert kept.get("lib/db/fields.py:Field") == "lib/db/table.py:Table"
+    assert "lib/forms/fields.py:Field" not in kept
+
+
+def test_a_method_call_on_self_is_not_a_project_function_of_the_same_name(tmp_path):
+    kept, _ = _same_names(tmp_path)
+    assert "lib/auth.py:Guest" not in kept                  # self.get_user() is Confirm's own method
+
+
+def test_a_subclass_folds_into_the_base_its_file_imports(tmp_path):
+    _, s = _same_names(tmp_path)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert "lib/a/text.py:Text" not in N                    # folded into a base, not a box of its own
+    assert N["lib/a/base.py:Node"]["members"] == [{"vis": "+", "name": "subclasses: Text"}]
+    assert N["lib/b/base.py:Node"]["members"] == []

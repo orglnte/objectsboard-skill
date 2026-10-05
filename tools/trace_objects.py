@@ -137,6 +137,128 @@ def _private(name):
     return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
 
 
+def _dotted(p):
+    parts = list(Path(p).with_suffix("").parts)
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+EXTERNAL = "<external>"                       # a name imported from outside the project
+
+
+class Names:
+    """What a name in a module under root stands for, read through that
+    module's imports, re-exports and star imports: a class or function id
+    (`file:Name`), a module file, EXTERNAL, or None when the code does not
+    say. Never matched project-wide by the bare name: two classes may share
+    one."""
+
+    def __init__(self, root):
+        files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+        self.mod_file = {_dotted(p): str(p) for p in files}
+        self.trees, self.defined, self.imports, self.stars = {}, {}, {}, {}
+        for p in files:
+            try:
+                t = ast.parse(p.read_text())
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            f = str(p)
+            self.trees[f] = t
+            here = _dotted(p)
+            pkg = here if p.name == "__init__.py" else here.rpartition(".")[0]
+            self.defined[f] = {n.name for n in t.body if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+            local = self.imports[f] = {}      # local name -> (file, name), (file, None) for a module, or EXTERNAL
+            stars = self.stars[f] = []
+            for n in ast.walk(t):
+                if isinstance(n, ast.Import):
+                    for a in n.names:
+                        local[a.asname or a.name] = (self.mod_file[a.name], None) if a.name in self.mod_file else EXTERNAL
+                elif isinstance(n, ast.ImportFrom):
+                    base = n.module or ""
+                    if n.level:
+                        up = pkg.split(".")[: len(pkg.split(".")) - (n.level - 1)]
+                        base = ".".join(up + ([n.module] if n.module else []))
+                    for a in n.names:
+                        if a.name == "*":
+                            if base in self.mod_file:
+                                stars.append(self.mod_file[base])
+                        elif f"{base}.{a.name}" in self.mod_file:
+                            local[a.asname or a.name] = (self.mod_file[f"{base}.{a.name}"], None)
+                        else:
+                            local[a.asname or a.name] = (self.mod_file[base], a.name) if base in self.mod_file else EXTERNAL
+
+    def resolve(self, f, name, depth=0):
+        if name in self.defined.get(f, ()):
+            return f"{f}:{name}"
+        if depth > 8:
+            return None
+        hit = self.imports.get(f, {}).get(name)
+        if hit == EXTERNAL:
+            return EXTERNAL
+        if hit:
+            g, n2 = hit
+            return self.resolve(g, n2, depth + 1) if n2 else g
+        if Path(f).name == "__init__.py" and f"{_dotted(f)}.{name}" in self.mod_file:
+            return self.mod_file[f"{_dotted(f)}.{name}"]        # a package's submodule
+        for g in self.stars.get(f, ()):
+            r = self.resolve(g, name, depth + 1)
+            if r:
+                return r
+        return None
+
+    def ref(self, f, expr):
+        """`Name` or `module.Name` in file f."""
+        if isinstance(expr, ast.Name):
+            return self.resolve(f, expr.id)
+        if isinstance(expr, ast.Attribute):
+            base = self.ref(f, expr.value)
+            if base == EXTERNAL:
+                return EXTERNAL
+            if base and ":" not in base:
+                return self.resolve(base, expr.attr)
+        return None
+
+    def call(self, f, call, cls=None):
+        """What a call in file f, in class cls, calls: `self.m()` is cls's own
+        method `file:cls.m`, anything else is read through the imports."""
+        fn = call.func
+        if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name) and fn.value.id in ("self", "cls"):
+            return f"{f}:{cls}.{fn.attr}" if cls else None
+        return self.ref(f, fn)
+
+
+def _classes_by_name(objs):
+    out = {}
+    for oid, o in objs.items():
+        if o["kind"] == "class":
+            out.setdefault(o["name"].split(".")[-1], []).append(oid)
+    return out
+
+
+def _built(names, by_name, objs, f, cls, call, makes=None):
+    """The class ids a call builds: a project class it names, or the classes
+    a project factory it names returns (`makes`). A name the imports do not
+    explain counts only when exactly one project class has it."""
+    t = names.call(f, call, cls)
+    if t is None:
+        cand = by_name.get(_called_name(call), [])
+        return set(cand) if len(cand) == 1 else set()
+    if objs.get(t, {}).get("kind") == "class":
+        return {t}
+    return set((makes or {}).get(t, ()))
+
+
+def _functions(t):
+    """(qualified name, function node, enclosing class name or None) for the
+    module's top-level functions and the methods of its top-level classes."""
+    for n in t.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield n.name, n, None
+        elif isinstance(n, ast.ClassDef):
+            for m in n.body:
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield f"{n.name}.{m.name}", m, n.name
+
+
 def private_reaches(root, objs):
     """Every reach of a private name from code under root, read from the
     code: an attribute `x._name` (not on self, cls or super()) whose name
@@ -154,13 +276,10 @@ def private_reaches(root, objs):
             trees.append((p, ast.parse(p.read_text())))
         except (SyntaxError, UnicodeDecodeError):
             continue
-    by_name = {}
-    for oid, o in objs.items():
-        if o["kind"] == "class":
-            by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
+    resolver, by_name = Names(root), _classes_by_name(objs)
 
-    def made(expr):
-        return {nm for c in ast.walk(expr) if isinstance(c, ast.Call) and (nm := _called_name(c)) in by_name}
+    def made(f, cls, expr):
+        return {k for c in ast.walk(expr) if isinstance(c, ast.Call) for k in _built(resolver, by_name, objs, f, cls, c)}
 
     defs = {}                                 # private name -> {(kind, definer)}
     holds = {}
@@ -175,7 +294,7 @@ def private_reaches(root, objs):
                         if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "self" \
                                 and _private(x.attr):
                             defs.setdefault(x.attr, set()).add(("class", cid))
-                            holds.setdefault((cid, x.attr), set()).update(made(n.value))
+                            holds.setdefault((cid, x.attr), set()).update(made(str(p), c.name, n.value))
         for n in t.body:
             names = [n.name] if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else \
                 [x.id for x in (n.targets if isinstance(n, ast.Assign) else [n.target]) if isinstance(x, ast.Name)] \
@@ -326,31 +445,19 @@ def owners(root, objs):
     other class (`self.x = Other(...)` in its body, also inside `a or b` and
     `a if c else b`, or `self.x = make(...)` where `make` is a project
     function whose `return Other(...)` builds it). A class kept by several
-    owners has none: it is shared."""
-    by_name = {}
-    for oid, o in objs.items():
-        if o["kind"] == "class":
-            by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
-    trees = []
-    for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        try:
-            trees.append((p, ast.parse(p.read_text())))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-    makes = {}                                # factory name -> class names its returns build
-    for _, t in trees:
-        for fn in [n for n in ast.walk(t) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            if fn.name in by_name:
-                continue
+    owners has none: it is shared. Names are read through each module's
+    imports (Names), never matched project-wide."""
+    names, by_name = Names(root), _classes_by_name(objs)
+    makes = {}                                # factory id -> class ids its returns build
+    for f, t in names.trees.items():
+        for qual, fn, cls in _functions(t):
             for r in [n for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]:
-                makes.setdefault(fn.name, set()).update(
-                    nm for c in _top_calls(r.value) if (nm := _called_name(c)) in by_name)
+                makes.setdefault(f"{f}:{qual}", set()).update(
+                    k for c in _top_calls(r.value) for k in _built(names, by_name, objs, f, cls, c))
     kept = {}
-    for p, t in trees:
+    for f, t in names.trees.items():
         for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
-            owner = f"{p}:{c.name}"
+            owner = f"{f}:{c.name}"
             if owner not in objs:
                 continue
             for n in ast.walk(c):
@@ -361,18 +468,16 @@ def owners(root, objs):
                            for x in targets) or n.value is None:
                     continue
                 for call in [x for x in ast.walk(n.value) if isinstance(x, ast.Call)]:
-                    name = _called_name(call)
-                    names = [name] if name in by_name else sorted(makes.get(name, ()))
-                    for kid in (k for nm in names for k in by_name.get(nm, [])):
+                    for kid in sorted(_built(names, by_name, objs, f, c.name, call, makes)):
                         if kid != owner:
                             kept.setdefault(kid, set()).add(owner)
     return {k: next(iter(v)) for k, v in kept.items() if len(v) == 1}
 
 
-def _handed_out(fn, built, by_name):
-    """Class names a function returns: built in a return (`built(expr)`),
+def _handed_out(fn, built, annotated):
+    """Class ids a function returns: built in a return (`built(expr)`),
     bound to a name it returns (`x = C()`, `xs.append(C(...))`), or named
-    in its return annotation (`-> list[C]`)."""
+    in its return annotation (`-> list[C]`, `annotated(expr)`)."""
     bound = {}
     for n in ast.walk(fn):
         if isinstance(n, ast.Assign):
@@ -389,93 +494,97 @@ def _handed_out(fn, built, by_name):
         if isinstance(r.value, ast.Name):
             out |= bound.get(r.value.id, set())
     if fn.returns is not None:
-        out |= {x.id if isinstance(x, ast.Name) else x.attr for x in ast.walk(fn.returns)
-                if isinstance(x, (ast.Name, ast.Attribute)) and (x.id if isinstance(x, ast.Name) else x.attr) in by_name}
+        out |= annotated(fn.returns)
     return out
 
 
 def exposed(root, objs):
-    """{(owner class id, class name)}: the classes an owner hands out, through
+    """{(owner class id, class id)}: the classes an owner hands out, through
     a public attribute (`self.x = Other(...)`, directly or through a project
     factory) or a public method or property that returns one (built in the
     return, collected in a name it returns, or named in its annotation), or
     is named after it (`def workspace` -> Workspace). What is public is the
-    owner's interface: a call into a part it hands out goes through the owner."""
-    by_name = {}
-    for oid, o in objs.items():
-        if o["kind"] == "class":
-            by_name.setdefault(o["name"].split(".")[-1], []).append(oid)
+    owner's interface: a call into a part it hands out goes through the owner.
+    Names are read through each module's imports (Names)."""
+    names, by_name = Names(root), _classes_by_name(objs)
     snake = {re.sub(r"(?<!^)(?=[A-Z])", "_", n).lower(): n for n in by_name}
-    trees = []
-    for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        try:
-            trees.append((p, ast.parse(p.read_text())))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-    def direct(expr):
-        return {nm for c in ast.walk(expr) if isinstance(c, ast.Call) and (nm := _called_name(c)) in by_name}
+
+    def annotated(f):
+        def ids(expr):
+            return {r for x in ast.walk(expr) if isinstance(x, (ast.Name, ast.Attribute))
+                    and objs.get(r := names.ref(f, x), {}).get("kind") == "class"}
+        return ids
+
+    def builder(f, cls, makes=None):
+        def built(expr):
+            return {k for c in ast.walk(expr) if isinstance(c, ast.Call)
+                    for k in _built(names, by_name, objs, f, cls, c, makes)}
+        return built
 
     makes = {}
-    for _, t in trees:
-        for fn in [n for n in ast.walk(t) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            makes.setdefault(fn.name, set()).update(_handed_out(fn, direct, by_name))
-
-    def built(expr):
-        out = set()
-        for call in [x for x in ast.walk(expr) if isinstance(x, ast.Call)]:
-            name = _called_name(call)
-            out |= {name} if name in by_name else makes.get(name, set())
-        return out
+    for f, t in names.trees.items():
+        for qual, fn, cls in _functions(t):
+            makes[f"{f}:{qual}"] = _handed_out(fn, builder(f, cls), annotated(f))
 
     out = set()
-    for p, t in trees:
+    for f, t in names.trees.items():
         for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
-            owner = f"{p}:{c.name}"
+            owner = f"{f}:{c.name}"
             if owner not in objs:
                 continue
+            built = builder(f, c.name, makes)
             for n in ast.walk(c):
                 if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
                     targets = n.targets if isinstance(n, ast.Assign) else [n.target]
                     if any(isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "self"
                            and not x.attr.startswith("_") for x in targets):
-                        out |= {(owner, nm) for nm in built(n.value)}
-            for f in c.body:
-                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and not f.name.startswith("_"):
-                    out |= {(owner, nm) for nm in _handed_out(f, built, by_name)}
-                    if f.name in snake:
-                        out.add((owner, snake[f.name]))
+                        out |= {(owner, k) for k in built(n.value)}
+            for m in c.body:
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and not m.name.startswith("_"):
+                    out |= {(owner, k) for k in _handed_out(m, built, annotated(f))}
+                    if m.name in snake:       # named after the class: the one this module sees, else the only one
+                        cand = by_name[snake[m.name]]
+                        seen = [k for k in cand if names.resolve(f, snake[m.name]) == k]
+                        out |= {(owner, k) for k in (seen or (cand if len(cand) == 1 else []))}
     return out
 
 
 def class_facts(root):
-    """Per class id: its base names, and whether it is a value class (a
+    """Per class id: its base names, its bases' class ids (read through the
+    module's imports; a base the imports do not explain counts when exactly
+    one project class has its name), and whether it is a value class (a
     dataclass, NamedTuple, Enum or TypedDict, or a class with no public
     method of its own)."""
-    out = {}
-    for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" in p.parts:
-            continue
-        try:
-            t = ast.parse(p.read_text())
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+    names, out = Names(root), {}
+    by_name = {}
+    for f, t in names.trees.items():
+        for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
+            by_name.setdefault(c.name, []).append(f"{f}:{c.name}")
+
+    def base_id(f, b):
+        r = names.ref(f, b)
+        if r is None:
+            cand = by_name.get(ast.unparse(b).split(".")[-1], [])
+            return cand[0] if len(cand) == 1 else None
+        return r if r in by_name.get(r.rpartition(":")[2], ()) else None
+
+    for f, t in names.trees.items():
         for c in [n for n in ast.walk(t) if isinstance(n, ast.ClassDef)]:
             bases = [ast.unparse(b).split(".")[-1] for b in c.bases]
             decos = [ast.unparse(d) for d in c.decorator_list]
-            public = [f for f in c.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
-                      and not f.name.startswith("_")]
+            public = [m for m in c.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and not m.name.startswith("_")]
             value = (any("dataclass" in d for d in decos) or {"NamedTuple", "Enum", "IntEnum", "TypedDict"} & set(bases)
                      or not public)
             makes = {n.func.id if isinstance(n.func, ast.Name) else n.func.attr
                      for n in ast.walk(c) if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute))}
-            out[f"{p}:{c.name}"] = {"bases": bases, "value": bool(value), "makes": makes}
+            out[f"{f}:{c.name}"] = {"bases": bases, "base_ids": [x for b in c.bases if (x := base_id(f, b))],
+                                    "value": bool(value), "makes": makes}
         in_classes = {id(x) for c in ast.walk(t) if isinstance(c, ast.ClassDef) for x in ast.walk(c)}
-        out[str(p)] = {"bases": [], "value": False,
-                       "makes": {n.func.id if isinstance(n.func, ast.Name) else n.func.attr
-                                 for n in ast.walk(t) if isinstance(n, ast.Call) and id(n) not in in_classes
-                                 and isinstance(n.func, (ast.Name, ast.Attribute))}}
+        out[f] = {"bases": [], "base_ids": [], "value": False,
+                  "makes": {n.func.id if isinstance(n.func, ast.Name) else n.func.attr
+                            for n in ast.walk(t) if isinstance(n, ast.Call) and id(n) not in in_classes
+                            and isinstance(n.func, (ast.Name, ast.Attribute))}}
     return out
 
 
@@ -757,9 +866,9 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
     facts = class_facts(root)
     keep = {k for k, o in objs.items() if o["kind"] == "class"
             and not facts.get(k, {}).get("value") and not is_exception(k, facts)}
-    byname = {objs[k]["name"].split(".")[-1]: k for k in keep}
+    boxes = set(keep)
     for k in sorted(keep):                    # 3b: a subclass folds into its base
-        if any(b in byname and byname[b] != k for b in facts.get(k, {}).get("bases", [])):
+        if any(b in boxes and b != k for b in facts.get(k, {}).get("base_ids", [])):
             keep.discard(k)
 
     def primary_of_file(f):
@@ -802,7 +911,7 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
                 parent[oid] = prim            # rule 1: a second box class in a file nests in its primary
             continue
         if o["kind"] == "class":
-            base = next((byname[b] for b in facts.get(oid, {}).get("bases", []) if b in byname and byname[b] in keep), None)
+            base = next((b for b in facts.get(oid, {}).get("base_ids", []) if b in keep), None)
             if base:
                 box[oid] = sub_of[oid] = base
                 continue
@@ -877,20 +986,19 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
     def is_exposed(b):
         """b, and each box holding it, is a class its holder exposes."""
         while b in parent:
-            if b not in objs or objs[b]["kind"] != "class" or \
-                    (parent[b], objs[b]["name"].split(".")[-1]) not in shown:
+            if b not in objs or objs[b]["kind"] != "class" or (parent[b], b) not in shown:
                 return False
             b = parent[b]
         return True
 
     def handed(oid):
-        """A class instance its owner hands out: a class (not a box) whose
-        name a holder of its box exposes (`Shop.sales()` returning `Sale`s)."""
+        """A class instance its owner hands out: a class (not a box) that a
+        holder of its box exposes (`Shop.sales()` returning `Sale`s)."""
         if oid not in objs or objs[oid]["kind"] != "class" or oid in keep:
             return False
-        name, b = objs[oid]["name"].split(".")[-1], box.get(oid)
+        b = box.get(oid)
         while b is not None:
-            if (b, name) in shown:
+            if (b, oid) in shown:
                 return True
             b = parent.get(b)
         return False
@@ -908,9 +1016,8 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
             return Path(container) in Path(f).parents
         if kind == "module":
             return f == definer
-        dfile, dcls = definer.split(":", 1)
-        bases = facts.get(f"{f}:{cname}", {}).get("bases", []) if cname else []
-        return f == dfile or dcls.split(".")[-1] in bases
+        bases = facts.get(f"{f}:{cname}", {}).get("base_ids", []) if cname else []
+        return f == definer.split(":", 1)[0] or definer in bases
 
     reexported = reexports(root, objs, owner_of_file, primary_of_dir)
 
@@ -970,8 +1077,7 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
             continue
         a = box.get(f"{u['file']}:{u['cls']}") if u["cls"] and f"{u['file']}:{u['cls']}" in box else box.get(u["file"], u["file"])
         if u["kind"] == "class":
-            held = [box[k] for nm in u["holds"] for k in sorted(objs) if objs[k]["kind"] == "class"
-                    and objs[k]["name"].split(".")[-1] == nm and k in box]
+            held = [box[k] for k in u["holds"] if k in box]
             targets, where = held or [box.get(u["definer"], u["definer"])], objs[u["definer"]]["name"]
         else:
             targets = [module_box(u["definer"])]
@@ -995,7 +1101,7 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
             o = objs[b]
             subs = sorted(objs[k]["name"] for k, v in box.items() if v == b and k != b
                           and objs.get(k, {}).get("kind") == "class"
-                          and o["name"].split(".")[-1] in facts.get(k, {}).get("bases", []))
+                          and b in facts.get(k, {}).get("base_ids", []))
             nodes.append({"id": b, "name": o["name"], "kind": "object", "parent": parent.get(b),
                           "members": [{"vis": "+", "name": "subclasses: " + ", ".join(subs)}] if subs else [],
                           "note": o["file"]})

@@ -426,6 +426,44 @@ def test_a_kept_helper_class_does_not_make_its_files_class_owned(tmp_path):
     assert "lib/engine.py:Engine" in parents and parents["lib/engine.py:Engine"] is None
 
 
+ROUTING = {
+    "lib/__init__.py": "",
+    "lib/routing.py": '''
+def _norm(path):
+    return path.strip("/")
+
+
+class Route:
+    def matches(self, path):
+        return _norm(path) == "a"
+
+
+class Router:
+    def add(self, route):
+        return route
+''',
+    "lib/app.py": '''
+from lib.routing import Router
+
+
+class App:
+    def mount(self, router: Router):
+        return router.add(None)
+''',
+}
+
+
+def test_a_file_whose_name_matches_none_of_its_classes_has_no_owner_class(tmp_path):
+    s = _spec(tmp_path, ROUTING, [{"from": "lib/app.py:App", "to": "lib/routing.py:Router", "members": ["add"]},
+                                  {"from": "lib/routing.py:Route", "to": "lib/routing.py", "members": ["_norm"]}])
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/routing.py:Router"]["parent"] is None                  # not nested in Route by name order
+    assert N["lib/routing.py:Route"]["parent"] is None
+    assert N["lib/routing.py"]["kind"] == "module"                       # its functions: a module box
+    assert s["moves"] == []
+    assert _colours(s)[("lib/app.py:App", "lib/routing.py:Router")] == "blue"
+
+
 def _box(i, x, y, parent=None):
     return {"id": i, "name": i, "kind": "object", "members": [], "note": "", "parent": parent, "x": x, "y": y}
 

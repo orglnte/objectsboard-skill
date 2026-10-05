@@ -639,7 +639,8 @@ def spec_of(objs, edges, root, concepts=None, data=None):
 
     1. The file holds a box class: its functions and helper classes belong
        to that class (the class named after the file when it holds several;
-       the others nest inside it).
+       the others nest inside it). Several and none named after the file:
+       no owner class, each stands alone.
     2. The package names its class: any other module, and a box class that
        rule 3 does not place, belongs to the box class named after its
        folder (`cell/` -> Cell, `variants/` -> Variant), or the nearest
@@ -681,7 +682,7 @@ def spec_of(objs, edges, root, concepts=None, data=None):
         ks = [k for k in keep if objs[k]["file"] == f]
         stem = Path(f).parent.name if Path(f).name == "__init__.py" else Path(f).stem
         named = [k for k in ks if objs[k]["name"].split(".")[-1].lower() == stem.replace("_", "").lower()]
-        return (named or sorted(ks) or [None])[0]
+        return (named or (ks if len(ks) == 1 else []) or [None])[0]
 
     def primary_of_dir(d):
         for k in sorted(keep):

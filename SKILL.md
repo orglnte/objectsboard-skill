@@ -73,8 +73,11 @@ documentation, not an input.
 (the first rule that matches wins):
 
 1. The file holds a box class: its functions and helper classes belong to
-   it (the class named after the file, or after the package for an
-   `__init__.py`); another box class in the file nests inside it.
+   it (its only box class, or the one named after the file, or after the
+   package for an `__init__.py`); another box class in the file nests
+   inside it. A file with several box classes and none named after it has
+   no owner class: each box class stands alone, and its functions form a
+   module box.
 2. A box class created and kept by exactly one other nests in it
    (`self.x = Other(...)`, or `self.x = make(...)` where the project
    function `make` returns `Other(...)`); a subclass folds into its base.

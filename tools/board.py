@@ -30,12 +30,19 @@ build   check, then lay out: a node already in --keep (the diagram as the
         --stamp appends "(REV)" to the name.
         DOC.json holds {name, nodes, edges}, ready for `ArtifactData update`
         pinned to the version that was read.
---layout  ignore any kept positions and lay the diagram out from scratch,
-        for the fewest arrows over a box, then the fewest crossing arrows:
-        each box's parts are laid out first, then each level as one graph
-        of fixed-size blocks, by Graphviz `dot` when it is installed (both
-        directions tried, the better kept), else in a grid in connection
-        order; then sibling blocks swap places wherever that lowers them. Deterministic: the same spec gives
+--layout  ignore any kept positions and lay the diagram out from scratch.
+        Each box's parts are laid out first: the parts no arrow leaves the
+        box from in a grid in the middle, the parts arrows leave from around
+        it on the side facing those arrows (the layout runs twice: the first
+        pass shows where they go), same colours together (red, amber, blue,
+        purple, grey, data), each part stretched to its row's height and its
+        column's width so they line up. The top level is one graph of
+        fixed-size blocks, by Graphviz `dot` when it is installed (both
+        directions, with and without packing) and a grid; of those no larger
+        than COMPACT times the smallest and no longer than ASPECT to one, the
+        one with the fewest arrows over a box, then crossing arrows, is kept;
+        then top-level blocks swap places wherever that lowers them, and
+        each box's inside is mirrored where that does. Deterministic: the same spec gives
         the same layout. Each trial recounts the clutter, so the swaps are
         skipped on a level of more than SWAP_LIMIT boxes, and the whole-board
         pass (mirror and swap) on a board of more than REFINE_LIMIT arrows:
@@ -58,6 +65,8 @@ PAD, HEAD, LINE, CPAD = 10, 34, 17, 14
 KIND_RANK = ["writes", "spawns", "calls", "reads", "uses"]
 SWAP_LIMIT = 40                               # siblings: pairs to try grow with the square
 REFINE_LIMIT = 500                            # arrows: one whole-board clutter count grows with the square
+COMPACT = 1.5                                 # a top-level layout at most this times the smallest one
+ASPECT = 3                                    # ... and no longer than this to one
 
 
 # --- geometry: the board page's own box sizes --------------------------------
@@ -366,13 +375,14 @@ def clutter(d):
     return over, x
 
 
-def _dot(ids, size, edges, rankdir):
+def _dot(ids, size, edges, rankdir, pack=False):
     """{id: (x, y)} top-left positions from Graphviz dot, or None."""
     exe = shutil.which("dot")
     if not exe:
         return None
     q = lambda s: '"' + s.replace('"', '\\"') + '"'
-    lines = [f"digraph g {{ rankdir={rankdir}; nodesep=0.6; ranksep=0.8; ordering=out;",
+    lines = [f"digraph g {{ rankdir={rankdir}; nodesep=0.6; ranksep=0.8; ordering=out;"
+             + (' pack=true; packmode="array_u";' if pack else ""),
              "node [shape=box, fixedsize=true, label=\"\"];"]
     for i in ids:
         w, h = size[i]
@@ -434,8 +444,128 @@ def _level_score(ids, size, pos, edges):
     return sum(1 for s in segs for j, r in B.items() if j not in (s[0], s[1]) and _hits(s[2], s[3], r)), x
 
 
+def colour(n):
+    """The order a box's colour sorts in among its siblings: red, amber,
+    blue (a class), purple (a process), grey (code with no class, or never
+    seen at run time), data."""
+    f = n.get("flag") or ""
+    if f.startswith("private:") or "— private:" in f:
+        return 0
+    if f.startswith(("owner bypass", "shared", "doubt")) or "— owner bypass" in f or "— shared" in f:
+        return 1
+    if n.get("unobserved") or n["kind"] in ("module", "unowned"):
+        return 4
+    return {"object": 2, "process": 3}.get(n["kind"], 5)
+
+
+SIDES = ("top", "right", "bottom", "left")
+
+
+def _ring(ids, size, outer, key, prefer, gap=30):
+    """Inside a box: the parts no arrow leaves the box from in a core, in
+    rows; the parts arrows leave from around it, each on the side facing
+    its arrows when `prefer` says which (else in turn), so the arrows start
+    at the border. Same colours sit together. {id: (x, y)}."""
+    cell = {}                                 # (w, h) each part is stretched to, so rows and columns line up
+
+    def grid(items, cols):
+        colw = [max(size[i][0] for i in items[c::cols]) for c in range(cols)]
+        rowh = [max(size[i][1] for i in items[r:r + cols]) for r in range(0, len(items), cols)]
+        pos = {}
+        for k, i in enumerate(items):
+            r, c = divmod(k, cols)
+            pos[i] = (sum(colw[:c]) + gap * c, sum(rowh[:r]) + gap * r)
+            cell[i] = (colw[c], rowh[r])
+        return pos, sum(colw) + gap * (cols - 1), sum(rowh) + gap * (len(rowh) - 1)
+
+    def best_grid(items):
+        if not items:
+            return {}, 0, 0
+        def cost(cols):
+            saved = dict(cell)
+            _, w, h = grid(items, cols)
+            cell.clear(), cell.update(saved)
+            return w * h * (1 + abs(math.log(w / h / 1.6)))
+        return grid(items, min(range(1, len(items) + 1), key=cost))
+
+    inner = sorted((i for i in ids if i not in outer), key=key)
+    core, cw, ch = best_grid(inner)
+    total = sum(size[i][0] * size[i][1] for i in ids)
+    cap = max(cw, ch, math.sqrt(total))       # the most one side holds before the next is used
+    load = dict.fromkeys(SIDES, 0)
+    side = {}
+    span = lambda i, sd: size[i][0] if sd in ("top", "bottom") else size[i][1]
+    order = sorted((i for i in ids if i in outer), key=key)
+    for k, i in enumerate(order):
+        want = prefer.get(i)
+        tries = ([want] + [sd for sd in SIDES if sd != want]) if want else list(SIDES)
+        sd = next((t for t in tries if load[t] + span(i, t) <= cap), min(SIDES, key=lambda t: load[t]))
+        side[i] = sd
+        load[sd] += span(i, sd) + gap
+    rows = {sd: [i for i in order if side[i] == sd] for sd in SIDES}
+    tw = sum(size[i][0] + gap for i in rows["top"]) - gap if rows["top"] else 0
+    bw = sum(size[i][0] + gap for i in rows["bottom"]) - gap if rows["bottom"] else 0
+    lh = sum(size[i][1] + gap for i in rows["left"]) - gap if rows["left"] else 0
+    rh = sum(size[i][1] + gap for i in rows["right"]) - gap if rows["right"] else 0
+    T = max((size[i][1] for i in rows["top"]), default=-gap) + gap
+    for sd in ("top", "bottom"):
+        h = max((size[i][1] for i in rows[sd]), default=0)
+        for i in rows[sd]:
+            cell[i] = (size[i][0], h)
+    for sd in ("left", "right"):
+        w = max((size[i][0] for i in rows[sd]), default=0)
+        for i in rows[sd]:
+            cell[i] = (w, size[i][1])
+    L = max((cell[i][0] for i in rows["left"]), default=-gap) + gap
+    W, H = max(cw, tw, bw), max(ch, lh, rh)
+    pos = {i: (L + (W - cw) / 2 + x, T + (H - ch) / 2 + y) for i, (x, y) in core.items()}
+    x = L + (W - tw) / 2
+    for i in rows["top"]:
+        pos[i] = (x, T - gap - cell[i][1]); x += size[i][0] + gap
+    x = L + (W - bw) / 2
+    for i in rows["bottom"]:
+        pos[i] = (x, T + H + gap); x += size[i][0] + gap
+    y = T + (H - lh) / 2
+    for i in rows["left"]:
+        pos[i] = (L - gap - cell[i][0], y); y += size[i][1] + gap
+    y = T + (H - rh) / 2
+    for i in rows["right"]:
+        pos[i] = (L + W + gap, y); y += size[i][1] + gap
+    return pos, cell
+
+
 def layout(d):
-    """Lay d out from scratch for the least clutter; returns d."""
+    """Lay d out from scratch for the least clutter; returns d. Twice: the
+    first pass shows where each part's arrows go, the second puts each
+    part that has arrows leaving its box on the side facing them."""
+    chosen = {}
+    _layout(d, {}, chosen)
+    N = {n["id"]: n for n in d["nodes"]}
+    B = bounds(d)
+    chain = {i: {i} | ancestors(d, i) for i in N}
+    far = {}                                  # part -> the far ends of the arrows that leave its box
+    for e in d["edges"]:
+        if e["from"] not in N or e["to"] not in N:
+            continue
+        for a, b in ((e["from"], e["to"]), (e["to"], e["from"])):
+            for i in chain[a] - chain[b]:
+                p = N[i].get("parent")
+                if p in N and p not in chain[b]:
+                    far.setdefault(i, []).append(b)
+    prefer = {}
+    for i, ends in far.items():
+        p = N[i]["parent"]
+        cx, cy = B[p][0] + B[p][2] / 2, B[p][1] + B[p][3] / 2
+        dx = sum(B[j][0] + B[j][2] / 2 for j in ends) / len(ends) - cx
+        dy = sum(B[j][1] + B[j][3] / 2 for j in ends) / len(ends) - cy
+        prefer[i] = (("right" if dx > 0 else "left") if abs(dx) * B[p][3] >= abs(dy) * B[p][2] else
+                     ("bottom" if dy > 0 else "top"))
+    return _layout(d, prefer, chosen)
+
+
+def _layout(d, prefer, chosen):
+    """One layout pass; `chosen` keeps the top level's way (Graphviz
+    direction and packing, or the grid) so a second pass makes only that one."""
     N = {n["id"]: n for n in d["nodes"]}
     kids = {}
     for n in d["nodes"]:
@@ -463,10 +593,40 @@ def layout(d):
             else:
                 size[i] = own(N[i])
         level = set(ids)
+        if parent is not None:
+            outer = {under(e[k], level) for e in d["edges"] for k, o in (("from", "to"), ("to", "from"))
+                     if under(e[k], level) and not under(e[o], level)}
+            pos, cell = _ring(ids, size, outer, lambda i: (colour(N[i]), N[i]["name"]), prefer)
+            for i, wh in cell.items():
+                if not kids.get(i):           # a box holding others is sized by them
+                    stretch[i] = wh
+                    size[i] = wh
+            x0 = min((pos[i][0] for i in ids), default=0)
+            y0 = min((pos[i][1] for i in ids), default=0)
+            rel[parent] = {i: (pos[i][0] - x0, pos[i][1] - y0) for i in ids}
+            return (max((pos[i][0] - x0 + size[i][0] for i in ids), default=0),
+                    max((pos[i][1] - y0 + size[i][1] for i in ids), default=0))
         pairs = {(under(e["from"], level), under(e["to"], level)) for e in d["edges"]}
         edges = sorted((a, b) for a, b in pairs if a and b and a != b)
-        cands = [p for p in (_dot(ids, size, edges, r) for r in ("TB", "LR")) if p] or [_grid(ids, size, edges)]
-        pos = min(cands, key=lambda p: _level_score(ids, size, p, edges))
+        group = {i: i for i in ids}           # packing changes nothing on a graph in one piece
+        root = lambda i: i if group[i] == i else root(group[i])
+        for a, b in edges:
+            group[root(a)] = root(b)
+        pieces = len({root(i) for i in ids})
+        ways = [w for w in [("TB", False), ("LR", False), ("TB", True), ("LR", True), "grid"]
+                if (w == "grid" or not w[1] or pieces > 1) and (chosen.get("way") in (None, w))]
+        made = {w: _grid(ids, size, edges) if w == "grid" else _dot(ids, size, edges, *w) for w in ways}
+        made = {w: p for w, p in made.items() if p} or {"grid": _grid(ids, size, edges)}
+        cands = list(made.values())
+
+        def box(p):
+            w = max(p[i][0] + size[i][0] for i in ids) - min(p[i][0] for i in ids)
+            h = max(p[i][1] + size[i][1] for i in ids) - min(p[i][1] for i in ids)
+            return w * h, max(w / h, h / w)
+        least = min(box(p)[0] for p in cands)
+        fit = [p for p in cands if box(p)[0] <= COMPACT * least and box(p)[1] <= ASPECT] or [min(cands, key=lambda p: box(p)[0])]
+        pos = min(fit, key=lambda p: _level_score(ids, size, p, edges))
+        chosen["way"] = next(w for w, p in made.items() if p is pos)
         better = True
         while better and len(ids) <= SWAP_LIMIT:   # swap two siblings when it lowers the count
             better = False
@@ -489,13 +649,15 @@ def layout(d):
         return (max((pos[i][0] - x0 + size[i][0] for i in ids), default=0),
                 max((pos[i][1] - y0 + size[i][1] for i in ids), default=0))
 
-    rel = {}
+    rel, stretch = {}, {}
     place(None)
 
     def put(parent, ox, oy):
         for i, (x, y) in rel.get(parent, {}).items():
             n = N[i]
             n.pop("w", None), n.pop("h", None)
+            if i in stretch:
+                n["w"], n["h"] = map(math.ceil, stretch[i])
             n["x"], n["y"] = round(ox + x), round(oy + y)
             if kids.get(i):
                 put(i, n["x"] + CPAD, n["y"] + own(n)[1] + CPAD)
@@ -539,7 +701,7 @@ def refine(d, kids):
                 else:
                     for i, (dx, dy) in moves.items():
                         move_tree(d, i, -dx, -dy)
-            for k, a in enumerate(ids if len(ids) <= SWAP_LIMIT else []):
+            for k, a in enumerate(ids if parent is None and len(ids) <= SWAP_LIMIT else []):
                 for b in ids[k + 1:]:
                     B = bounds(d)
                     da = (B[b][0] - B[a][0], B[b][1] - B[a][1])

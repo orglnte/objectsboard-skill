@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import subprocess
 import sys
@@ -723,6 +724,63 @@ def test_layout_is_deterministic_clear_of_overlaps_and_keeps_parts_inside(monkey
         assert B["e"][1] < B[p][1] and B[p][1] + B[p][3] < B["e"][1] + B["e"][3]
     stacked = board.build(_square_spec(), None, None)   # the default placement, for comparison
     assert board.clutter(d1) <= board.clutter(stacked)
+
+
+def _owner_spec():
+    """Owner holds eight parts; one calls Client outside it, the others only each other or nothing."""
+    parts = [f"p{k}" for k in range(8)]
+    nodes = [_box("Owner", 0, 0), _box("Client", 0, 0)] + [_box(i, 0, 0, "Owner") for i in parts]
+    for i in ("p5", "p6", "p7"):
+        next(n for n in nodes if n["id"] == i)["kind"] = "module"
+    next(n for n in nodes if n["id"] == "p3")["flag"] = "private: reaches _x of p3 from outside it"
+    next(n for n in nodes if n["id"] == "p2")["members"] = [{"vis": "+", "name": "a_long_member_name_here"}]
+    edges = [("p0", "Client"), ("Client", "Owner"), ("p1", "p2")]
+    return {"name": "own", "nodes": nodes,
+            "edges": [{"from": f, "to": t, "kind": "calls", "label": "", "proof": [{"observed": "run"}]} for f, t in edges]}
+
+
+@pytest.mark.parametrize("dot", [True, False])
+def test_inside_a_box_a_part_with_arrows_out_sits_on_the_border_facing_them(monkeypatch, dot):
+    if not dot:
+        monkeypatch.setattr(board.shutil, "which", lambda _: None)
+    elif not board.shutil.which("dot"):
+        pytest.skip("Graphviz not installed")
+    d = board.build(_owner_spec(), None, None, fresh=True)
+    B = board.bounds(d)
+    c = lambda i: (B[i][0] + B[i][2] / 2, B[i][1] + B[i][3] / 2)
+    dist = lambda i: math.dist(c(i), c("Client"))
+    rest = [f"p{k}" for k in range(1, 8)]
+    assert all(dist("p0") < dist(i) for i in rest)            # nearest its arrow's far end
+    core = [B[i] for i in rest]
+    x0, y0 = min(b[0] for b in core), min(b[1] for b in core)
+    x1, y1 = max(b[0] + b[2] for b in core), max(b[1] + b[3] for b in core)
+    b = B["p0"]
+    assert b[0] >= x1 or b[0] + b[2] <= x0 or b[1] >= y1 or b[1] + b[3] <= y0   # outside the middle
+    assert all(board.overlaps(d, n["id"]) == [] for n in d["nodes"])
+
+
+def test_inside_a_box_same_colours_sit_together_and_the_parts_line_up():
+    d = board.build(_owner_spec(), None, None, fresh=True)
+    N = {n["id"]: n for n in d["nodes"]}
+    middle = sorted((N[f"p{k}"] for k in range(1, 8)), key=lambda n: (n["y"], n["x"]))
+    assert [board.colour(n) for n in middle] == sorted(board.colour(n) for n in middle)   # red, blue, then grey
+    cols = {}
+    for n in middle:
+        cols.setdefault(n["x"], set()).add(n["w"])
+    assert len(cols) > 1 and all(len(w) == 1 for w in cols.values())   # one width down each column
+    rows = {}
+    for n in middle:
+        rows.setdefault(n["y"], set()).add(n["h"])
+    assert all(len(h) == 1 for h in rows.values())                     # one height along each row
+
+
+def test_boxes_with_no_arrows_between_them_are_packed_not_laid_in_a_row():
+    d = board.build({"name": "row", "nodes": [_box(f"q{k}", 0, 0) for k in range(12)], "edges": []},
+                    None, None, fresh=True)
+    B = board.bounds(d).values()
+    w = max(b[0] + b[2] for b in B) - min(b[0] for b in B)
+    h = max(b[1] + b[3] for b in B) - min(b[1] for b in B)
+    assert max(w / h, h / w) <= board.ASPECT
 
 
 OVERLAY_MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"

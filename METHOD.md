@@ -202,11 +202,14 @@ green, and the board is redrawn before the next owner is decided.
    regex) does not match; `build` lays the diagram out, keeping the
    positions of every box the board already has and placing new ones next
    to their main neighbour without overlap, and stamps the revision;
-   `build --layout` ignores kept positions and lays the diagram out for the
-   fewest arrows over a box, then the fewest crossing arrows (each box's
-   parts first, each level by Graphviz
-   `dot` when installed, else a grid; then boxes mirrored and swapped on
-   the whole board while they drop; deterministic); `crossings`
+   `build --layout` ignores kept positions and lays the diagram out from
+   scratch (each box's parts first: the parts no arrow leaves the box from
+   in a grid in the middle, the parts arrows leave from on the border
+   facing those arrows, same colours together, every part stretched so
+   rows and columns line up; the top level by Graphviz `dot` when
+   installed, and a grid, the compact candidate with the fewest arrows
+   over a box, then crossings, kept; then top-level boxes swapped and
+   insides mirrored while that lowers them; deterministic); `crossings`
    counts the arrows that cross and the arrows over a box;
    `collapse` merges the arrows per pair of boxes; `simplify` makes the
    simplified view. `check` also refuses an arrow

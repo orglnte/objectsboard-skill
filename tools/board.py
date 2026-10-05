@@ -36,7 +36,10 @@ build   check, then lay out: a node already in --keep (the diagram as the
         of fixed-size blocks, by Graphviz `dot` when it is installed (both
         directions tried, the better kept), else in a grid in connection
         order; then sibling blocks swap places wherever that lowers them. Deterministic: the same spec gives
-        the same layout.
+        the same layout. Each trial recounts the clutter, so the swaps are
+        skipped on a level of more than SWAP_LIMIT boxes, and the whole-board
+        pass (mirror and swap) on a board of more than REFINE_LIMIT arrows:
+        a big codebase keeps the Graphviz (or grid) layout as it is.
 crossings  the layout's clutter, as the page draws it (straight arrows
         between box centres, clipped at the borders): pairs of arrows that
         cross, and arrows that pass over a box that is neither end nor holds
@@ -53,6 +56,8 @@ import argparse, json, math, pathlib, re, shutil, subprocess, sys
 
 PAD, HEAD, LINE, CPAD = 10, 34, 17, 14
 KIND_RANK = ["writes", "spawns", "calls", "reads", "uses"]
+SWAP_LIMIT = 40                               # siblings: pairs to try grow with the square
+REFINE_LIMIT = 500                            # arrows: one whole-board clutter count grows with the square
 
 
 # --- geometry: the board page's own box sizes --------------------------------
@@ -107,8 +112,19 @@ def ancestors(d, i):
 def overlaps(d, i):
     B = bounds(d)
     a, anc = B[i], ancestors(d, i)
-    return [j for j, b in B.items() if j != i and j not in anc and i not in ancestors(d, j)
-            and a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]]
+    parent = {n["id"]: n.get("parent") for n in d["nodes"]}
+
+    def inside(j):                            # j sits inside i's box
+        p = parent.get(j)
+        while p:
+            if p == i:
+                return True
+            p = parent.get(p)
+        return False
+
+    return [j for j, b in B.items() if j != i and j not in anc
+            and a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+            and not inside(j)]
 
 
 def move_tree(d, i, dx, dy):
@@ -452,7 +468,7 @@ def layout(d):
         cands = [p for p in (_dot(ids, size, edges, r) for r in ("TB", "LR")) if p] or [_grid(ids, size, edges)]
         pos = min(cands, key=lambda p: _level_score(ids, size, p, edges))
         better = True
-        while better:                         # swap two siblings when it lowers the count
+        while better and len(ids) <= SWAP_LIMIT:   # swap two siblings when it lowers the count
             better = False
             score = _level_score(ids, size, pos, edges)
             for k, a in enumerate(ids):
@@ -485,7 +501,8 @@ def layout(d):
                 put(i, n["x"] + CPAD, n["y"] + own(n)[1] + CPAD)
 
     put(None, 0, 0)
-    refine(d, kids)
+    if len(d["edges"]) <= REFINE_LIMIT:
+        refine(d, kids)
     return d
 
 
@@ -522,7 +539,7 @@ def refine(d, kids):
                 else:
                     for i, (dx, dy) in moves.items():
                         move_tree(d, i, -dx, -dy)
-            for k, a in enumerate(ids):
+            for k, a in enumerate(ids if len(ids) <= SWAP_LIMIT else []):
                 for b in ids[k + 1:]:
                     B = bounds(d)
                     da = (B[b][0] - B[a][0], B[b][1] - B[a][1])

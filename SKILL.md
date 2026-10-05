@@ -87,9 +87,14 @@ documentation, not an input.
 
 **Data's owner is its only writer in the code** (a write anywhere in the
 function that reaches it, or through the name the path is kept in). Several
-writers: no single owner, each write flagged as shared. Data reached only
-through a helper that returns its path is not followed: its writers are
-not seen.
+writers: no single owner, each write flagged as shared. A helper that
+returns a data path (`return self.root / "out"`) passes the reach to its
+callers: a caller's write through it counts as the caller's, and a path the
+owner's own public helper hands out is reached through the owner.
+
+**Processes:** a module the code starts as its own Python process (an argv
+with `-m pkg.mod`, or an interpreter and the file itself) is a process box,
+with a "starts it" arrow from the code that builds the command line.
 
 **The criterion:** one owner per part and per datum; everything else goes
 through the owner (information hiding, the aggregate root, the Law of

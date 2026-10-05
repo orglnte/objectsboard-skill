@@ -678,3 +678,76 @@ def test_data_without_a_concept_map(tmp_path):
     N = {n["id"]: n for n in s["nodes"]}
     assert N["resource:out/"]["note"] == "owner: Report"                    # the data, with no concept map
     assert not any("concepts" in n for n in s["nodes"]) and s["unmapped"] == []
+
+
+def test_a_module_started_as_its_own_process_is_a_process_box(tmp_path):
+    files = {
+        "lib/__init__.py": "",
+        "lib/runner.py": ("import sys\n\n\nclass Runner:\n    \"\"\"Starts `python -m lib.worker` (a mention, not a launch).\"\"\"\n\n"
+                          "    def argv(self):\n        return [sys.executable, \"-m\", \"lib.worker\", \"x\"]\n"),
+        "lib/worker.py": "def main():\n    return 1\n",
+        "lib/probe.py": ("import os, subprocess, sys\n\n\ndef check():\n"
+                         "    return subprocess.run([sys.executable, os.path.abspath(__file__), \"child\"])\n"),
+    }
+    s = _spec(tmp_path, files, [])
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["process:lib.worker"]["kind"] == "process"
+    assert N["process:lib.probe"]["kind"] == "process"                   # a file that runs itself
+    spawns = {(e["from"], e["to"]) for e in s["edges"] if e["kind"] == "spawns"}
+    assert ("lib/runner.py:Runner", "process:lib.worker") in spawns
+    assert ("lib/probe.py", "process:lib.probe") in spawns
+    import re
+    for e in s["edges"]:
+        if e["kind"] == "spawns":                                         # board.py can prove each arrow
+            p = e["proof"][0]
+            assert re.search(p["pattern"], (tmp_path / p["file"]).read_text())
+
+
+def test_data_written_through_a_helper_that_returns_its_path_is_its_callers(tmp_path):
+    import trace_objects
+    files = {
+        "lib/__init__.py": "",
+        "lib/store.py": ("from pathlib import Path\n\n\nclass Store:\n    def out_dir(self):\n"
+                         "        return Path(\".\") / \"out\"\n\n    def save(self):\n        self.out_dir().mkdir()\n"),
+        "lib/dump.py": "def dump(store):\n    (store.out_dir() / \"x\").write_text(\"x\")\n",
+    }
+    for rel, text in files.items():
+        q = tmp_path / rel
+        q.parent.mkdir(parents=True, exist_ok=True)
+        q.write_text(text)
+    (tmp_path / "DATA.md").write_text("| Resource | Kind | Owner | Reached by |\n|---|---|---|---|\n| `out/` | folder | - | `/ \"out\"` |\n")
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        s = trace_objects.spec_of(objs, [], "lib", data="DATA.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["resource:out/"]["note"] == "no single owner: written by dump.py, Store"   # both write through out_dir()
+
+
+def test_a_path_the_owners_public_helper_hands_out_is_reached_through_the_owner(tmp_path):
+    import trace_objects
+    files = {
+        "lib/__init__.py": "",
+        "lib/store.py": ("from pathlib import Path\n\n\nclass Store:\n    def out_dir(self):\n"
+                         "        return Path(\".\") / \"out\"\n\n    def save(self):\n        self.out_dir().mkdir()\n"),
+        "lib/report.py": "def size(store):\n    return len(list(store.out_dir().iterdir()))\n",
+        "lib/peek.py": "from pathlib import Path\n\n\ndef peek():\n    return (Path(\".\") / \"out\").exists()\n",
+    }
+    for rel, text in files.items():
+        q = tmp_path / rel
+        q.parent.mkdir(parents=True, exist_ok=True)
+        q.write_text(text)
+    (tmp_path / "DATA.md").write_text("| Resource | Kind | Owner | Reached by |\n|---|---|---|---|\n| `out/` | folder | - | `/ \"out\"` |\n")
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        s = trace_objects.spec_of(objs, [], "lib", data="DATA.md")
+    finally:
+        os.chdir(cwd)
+    flags = {e["from"]: e.get("flag", "") for e in s["edges"] if e["to"] == "resource:out/"}
+    assert flags["lib/report.py"] == ""                                  # the path Store hands out
+    assert flags["lib/peek.py"].startswith("owner bypass")               # the path built by hand

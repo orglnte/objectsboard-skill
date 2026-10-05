@@ -35,8 +35,11 @@ marked "[run time only]" and its proof is the observation itself.
 
 Run it with the project's own interpreter from the project root (it imports
 the project and needs pytest). It maps only what the tests run, so it needs
-tests with good coverage; plain attribute, constant and data reads and calls
-in other processes are not seen.
+tests with good coverage; plain attribute, constant and data reads, and calls
+inside other processes, are not seen. A module the code starts as its own
+process is drawn as a process box from its command line (processes()), and
+data reached through a helper that returns its path is its callers'
+(path_helpers()).
 """
 import argparse, ast, json, os, re, sys, threading
 from pathlib import Path
@@ -270,6 +273,54 @@ def reexports(root, objs, owner_of_file, primary_of_dir):
     return out
 
 
+def processes(root):
+    """Every command line in the code that starts a project module as its own
+    Python process: a list or tuple with "-m" followed by a project module
+    (`[sys.executable, "-m", "pkg.mod", ...]`), or an interpreter followed by
+    the file itself (`[sys.executable, os.path.abspath(__file__), ...]`).
+    Only argv literals count, never a mention in a docstring or a log line.
+    Each is {"file", "cls", "line", "module", "entry", "pattern"}."""
+    files = sorted(p for p in Path(root).rglob("*.py") if "__pycache__" not in p.parts)
+
+    def dotted(p):
+        parts = list(p.with_suffix("").parts)
+        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+    mod_file = {dotted(p): str(p) for p in files}
+    out = []
+    for p in files:
+        try:
+            t = ast.parse(p.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        spans = [(c.lineno, c.end_lineno, c.name) for c in ast.walk(t) if isinstance(c, ast.ClassDef)]
+
+        def cls_at(ln):
+            inner = [c for c in spans if c[0] <= ln <= c[1]]
+            return min(inner, key=lambda c: c[1] - c[0])[2] if inner else None
+
+        for n in ast.walk(t):
+            if not isinstance(n, (ast.List, ast.Tuple)):
+                continue
+            el = n.elts
+            for i, x in enumerate(el[:-1]):
+                nxt = el[i + 1]
+                if isinstance(x, ast.Constant) and x.value == "-m" and isinstance(nxt, ast.Constant) \
+                        and isinstance(nxt.value, str):
+                    mod = nxt.value
+                    entry = mod_file.get(mod + ".__main__") or mod_file.get(mod)
+                    if entry:
+                        out.append({"file": str(p), "cls": cls_at(n.lineno), "line": n.lineno, "module": mod,
+                                    "entry": entry, "pattern": r"[\"']-m[\"']\s*,\s*[\"']" + re.escape(mod) + r"[\"']"})
+                    break
+                if i == 0 and "__file__" in ast.unparse(nxt) and (
+                        "executable" in ast.unparse(x) or (isinstance(x, ast.Constant) and str(x.value).startswith("python"))):
+                    out.append({"file": str(p), "cls": cls_at(n.lineno), "line": n.lineno, "module": dotted(p),
+                                "entry": str(p), "pattern": r"__file__"})
+                    break
+    return out
+
+
 def owners(root, objs):
     """{class id: owner class id} for a class created and kept by exactly one
     other class (`self.x = Other(...)` in its body, also inside `a or b` and
@@ -484,6 +535,66 @@ def concept_rows(map_file):
         if line.startswith("|") and len(cells) > 6 and "`" in cells[4]:
             rows.append((cells[1].strip("* "), re.findall(r"`([^`]+)`", cells[4])))
     return rows
+
+
+GENERIC = {"path", "get", "open", "read", "write", "load", "save", "run", "main", "name"}
+PATH_CALLS = {"Path", "PurePath", "joinpath", "with_name", "with_suffix", "resolve", "expanduser", "join"}
+
+
+def _pathish(v):
+    """Is the expression a path, or a command line, rather than something
+    computed from one (a test, a read, a command's output)?"""
+    if isinstance(v, ast.BinOp) and isinstance(v.op, ast.Div):
+        return True
+    if isinstance(v, (ast.List, ast.Tuple, ast.JoinedStr)):
+        return True
+    if isinstance(v, ast.Constant) and isinstance(v.value, str):
+        return True
+    return isinstance(v, ast.Call) and _called_name(v) in PATH_CALLS
+
+
+def path_helpers(root, res_rows):
+    """{function name: (resource index, file, enclosing class or None)}: the
+    project functions that return a resource's path: a return expression, or
+    the name it returns, matches the resource's pattern.
+    Their callers are the ones that read or write it. Matched by name, so a
+    name two functions share, or a generic one, is left out."""
+    found, seen = {}, {}
+    for p in sorted(Path(root).rglob("*.py")):
+        if "__pycache__" in p.parts:
+            continue
+        try:
+            text = p.read_text()
+            t = ast.parse(text)
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        owner_of = {}
+        for c in [x for x in ast.walk(t) if isinstance(x, ast.ClassDef)]:
+            for f in c.body:
+                owner_of[id(f)] = c.name
+        for fn in ast.walk(t):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            seen[fn.name] = seen.get(fn.name, 0) + 1
+            if fn.name.lstrip("_") in GENERIC:
+                continue
+            bound = {}                        # name -> the expression it was assigned
+            for x in ast.walk(fn):
+                if isinstance(x, ast.Assign):
+                    for tgt in x.targets:
+                        if isinstance(tgt, ast.Name):
+                            bound[tgt.id] = x.value
+            returned = []
+            for x in ast.walk(fn):
+                if isinstance(x, ast.Return) and x.value is not None:
+                    v = bound.get(x.value.id, x.value) if isinstance(x.value, ast.Name) else x.value
+                    if _pathish(v):
+                        returned.append(ast.get_source_segment(text, v) or "")
+            for ri, (_n, _k, _o, pats) in enumerate(res_rows):
+                if any(re.search(pat, r) for pat in pats for r in returned):
+                    found[fn.name] = (ri, str(p), owner_of.get(id(fn)))
+                    break
+    return {k: v for k, v in found.items() if seen.get(k) == 1}
 
 
 def resource_rows(map_file):
@@ -813,6 +924,23 @@ def spec_of(objs, edges, root, concepts=None, data=None):
                  else {"observed": "called at run time through a subclass, a callback or an injected function"})
         E.append({"from": a, "to": b, "kind": "calls", "label": label + ("" if named else "  [run time only]"),
                   "members": ms, "proof": [proof]})
+    # processes: a module started as its own process is a box of its own,
+    # with an arrow from the code that builds its command line
+    for pr in processes(root):
+        a = box.get(f"{pr['file']}:{pr['cls']}") if pr["cls"] and f"{pr['file']}:{pr['cls']}" in box \
+            else box.get(pr["file"], pr["file"])
+        pid = f"process:{pr['module']}"
+        if pid not in {n["id"] for n in nodes}:
+            nodes.append({"id": pid, "name": f"python -m {pr['module']}", "kind": "process", "parent": None,
+                          "note": f"runs {pr['entry']} in a process of its own"})
+        if a not in {n["id"] for n in nodes}:
+            o = objs.get(a, {"name": Path(a).stem, "file": a, "kind": "module"})
+            nodes.append({"id": a, "name": o["name"] if o.get("kind") == "class" else Path(o["file"]).name,
+                          "kind": "object" if o.get("kind") == "class" else ("module" if a in parent else "external"),
+                          "parent": parent.get(a), "note": o["file"]})
+        if not any(e["from"] == a and e["to"] == pid for e in E):
+            E.append({"from": a, "to": pid, "kind": "spawns", "label": "starts it",
+                      "proof": [{"file": pr["file"], "pattern": pr["pattern"]}]})
     # 6: bypasses, from imports and from the run
     imp = importers(root)
     moves = {}
@@ -848,6 +976,8 @@ def spec_of(objs, edges, root, concepts=None, data=None):
     if res_rows:
         N = {n["id"]: n for n in nodes}
         hits = {}
+        helpers = path_helpers(root, res_rows)
+        helper_call = re.compile(r"(?<![\w])(" + "|".join(map(re.escape, helpers)) + r")\(") if helpers else None
         for pth in sorted(rootp.rglob("*.py")):
             if "__pycache__" in pth.parts:
                 continue
@@ -886,11 +1016,24 @@ def spec_of(objs, edges, root, concepts=None, data=None):
                             cname = min(inner, key=lambda c: c[1] - c[0])[2] if inner else None
                             src = box.get(f"{pth}:{cname}") if cname and f"{pth}:{cname}" in box else box.get(str(pth), str(pth))
                             h = hits.setdefault((src, ri), {"write": False, "file": str(pth), "pattern": pat, "names": []})
+                            h["direct"] = True
                             h["write"] |= writes_near(ln)
                             short = pat.replace("\\", "").strip('/ "').strip('"')
                             if short not in h["names"]:
                                 h["names"].append(short)
                             break
+                m = helper_call.search(line) if helper_call and not line.lstrip().startswith("def ") else None
+                if m:                         # a path a helper returns: the write is the caller's
+                    ri = helpers[m.group(1)][0]
+                    inner = [c for c in spans if c[0] <= ln <= c[1]]
+                    cname = min(inner, key=lambda c: c[1] - c[0])[2] if inner else None
+                    src = box.get(f"{pth}:{cname}") if cname and f"{pth}:{cname}" in box else box.get(str(pth), str(pth))
+                    h = hits.setdefault((src, ri), {"write": False, "file": str(pth),
+                                                    "pattern": re.escape(m.group(1)) + r"\(", "names": []})
+                    h["write"] |= writes_near(ln)
+                    h.setdefault("helpers", set()).add(m.group(1))
+                    if m.group(1) + "()" not in h["names"]:
+                        h["names"].append(m.group(1) + "()")
         def box_name(b):
             return objs[b]["name"] if b in objs and objs[b]["kind"] == "class" else (
                 (str(Path(b).parent) + "/") if Path(b).name == "__init__.py" else Path(b).name)
@@ -922,7 +1065,12 @@ def spec_of(objs, edges, root, concepts=None, data=None):
             label = " · ".join(h["names"][:3]) + (f"  (+{len(h['names']) - 3})" if len(h["names"]) > 3 else "")
             e = {"from": src, "to": f"resource:{rname}", "kind": "writes" if h["write"] else "reads", "label": label,
                  "proof": [{"file": h["file"], "pattern": h["pattern"]}]}
-            if len(w) == 1 and top(src) != w[0]:
+            def handed_by_owner(name):        # the owner's own public helper gave the path
+                _ri, hf, hc = helpers[name]
+                hb = box.get(f"{hf}:{hc}") if hc and f"{hf}:{hc}" in box else box.get(hf, hf)
+                return not _private(name) and top(hb) == w[0]
+            through_owner = not h.get("direct") and all(handed_by_owner(n) for n in h.get("helpers", ()))
+            if len(w) == 1 and top(src) != w[0] and not through_owner:
                 e["flag"] = f"owner bypass: reaches {box_name(w[0])}'s data directly"
             elif len(w) > 1 and h["write"]:
                 e["flag"] = "shared: written by " + ", ".join(box_name(x) for x in w)

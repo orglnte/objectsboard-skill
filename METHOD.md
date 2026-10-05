@@ -249,8 +249,11 @@ cannot see is not evidence that nothing is there.
 3. **Run-time traces (`trace_uses.py`, `trace_objects.py`):** code the tests never run, so the
    call graph is only as complete as the suite's coverage of the code that
    uses the target; reads of plain attributes, constants and data objects
-   (no function runs); calls in another process (subprocesses the tests
-   start).
+   (no function runs); calls inside another process (the tracer draws a
+   module started as its own process as a process box, from its command
+   line, but not the calls it makes). A data-path helper is followed by its
+   name only when one function in the project has that name; a generic name
+   (`path`, `get`, `open`, …) is never followed.
 4. **File scan (`file_contracts.py`):** a file name built at run time (only
    quoted names are matched).
 5. **Everything:** Python only. Other languages need the interface and its

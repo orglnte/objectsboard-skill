@@ -163,11 +163,13 @@ Without either, start from the object the user's question is about.
    for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
    Resources table only, so the board has data findings; a concept map,
    written by hand or with a concept-design skill, for the concept overlay;
-   or neither. Never block on it. In the same turn, ask two placement
-   questions, both off by default:
+   or neither. Never block on it. Then, in a turn of their own and the last
+   one before tracing, ask two placement questions, both off by default:
    1. Does the class named after the root folder own the root package's
-      modules (a flat library whose package is its one object, `shop/` ->
-      Shop)? Yes runs the tracer with `--root-owns`.
+      modules (`shop/` -> Shop)? Yes runs the tracer with `--root-owns`.
+      Say what yes means: in a flat repo with one package, that class then
+      contains everything, and the board becomes one box with the rest of
+      the code inside it.
    2. Should the modules no class owns be drawn together in one box, the
       unowned group (not an owner; titled with the deepest folder they
       share)? Yes runs it with `--group-unowned`; no leaves each module

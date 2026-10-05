@@ -174,6 +174,11 @@ Without either, start from the object the user's question is about.
       unowned group (not an owner; titled with the deepest folder they
       share)? Yes runs it with `--group-unowned`; no leaves each module
       box on its own.
+   After the questions, tell the user how to change the answers later: say
+   which one to change ("turn the unowned group on", "the root class owns
+   its package"), or ask to go through the questions again; the board is
+   then traced and redrawn with the new answers. The answers are not saved
+   anywhere but this conversation, so a new session asks again.
 1. Pick ONE object: the one the question is about, or the largest class or
    module on its path. In Python everything is an object: a module, a class
    or a function can be the target (`path/mod.py`, `path/mod.py:Name`). Never

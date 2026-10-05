@@ -618,6 +618,20 @@ def test_the_unowned_group_is_titled_with_the_deepest_folder_its_members_share()
     assert [n["name"] for n in nodes if n["kind"] == "unowned"] == ["unowned group — lib/sub/"]
 
 
+def test_saved_answers_fill_the_options_the_command_line_leaves_out(tmp_path):
+    import argparse, trace_objects
+    prefs = tmp_path / ".objectsboard.json"
+    assert trace_objects.load_prefs(str(prefs)) == {}                    # none saved
+    prefs.write_text(json.dumps({"root_owns": True, "group_unowned": True, "data": "DATA.md"}))
+    saved = trace_objects.load_prefs(str(prefs))
+    cli = argparse.Namespace(root_owns=None, group_unowned=False, data=None, concepts=None)
+    assert trace_objects.options(cli, saved) == {"root_owns": True, "group_unowned": False,   # the flag wins
+                                                 "data": "DATA.md", "concepts": None}
+    prefs.write_text("{not json")
+    with pytest.raises(SystemExit):
+        trace_objects.load_prefs(str(prefs))
+
+
 def _box(i, x, y, parent=None):
     return {"id": i, "name": i, "kind": "object", "members": [], "note": "", "parent": parent, "x": x, "y": y}
 

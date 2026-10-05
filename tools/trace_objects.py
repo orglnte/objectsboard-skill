@@ -1376,8 +1376,35 @@ def print_worklist(items, out=sys.stdout):
                 print(f"      {s_}", file=out)
 
 
+PREFS = ".objectsboard.json"
+
+
+def load_prefs(path=PREFS):
+    """The step 0 answers saved in the repo root ({"root_owns", "group_unowned",
+    "data", "concepts", "arrows"}); {} when there is none."""
+    try:
+        with open(path) as f:
+            prefs = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        sys.exit(f"{path} is not valid JSON: {e}")
+    if not isinstance(prefs, dict):
+        sys.exit(f"{path} must hold a JSON object")
+    return prefs
+
+
+def options(a, prefs):
+    """Each option from the command line when given there, else from the
+    saved answers, else its default."""
+    pick = lambda flag, key, default: flag if flag is not None else prefs.get(key, default)
+    return {"root_owns": bool(pick(a.root_owns, "root_owns", False)),
+            "group_unowned": bool(pick(a.group_unowned, "group_unowned", False)),
+            "data": pick(a.data, "data", None), "concepts": pick(a.concepts, "concepts", None)}
+
+
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(epilog=f"Options not given here come from {PREFS} in the current folder, if any.")
     ap.add_argument("--root", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--spec")
@@ -1386,10 +1413,10 @@ def main():
     ap.add_argument("--data", help="optional: a markdown Resources table (Resource | Kind | Owner | Reached by) naming "
                                    "the data, without a concept map")
     ap.add_argument("--tests-dir", default="tests")
-    ap.add_argument("--root-owns", action="store_true",
+    ap.add_argument("--root-owns", action=argparse.BooleanOptionalAction,
                     help="the class named after the root folder owns the root package's modules (a flat library: "
                          "`shop/` -> Shop); by default the root folder's class owns nothing")
-    ap.add_argument("--group-unowned", action="store_true",
+    ap.add_argument("--group-unowned", action=argparse.BooleanOptionalAction,
                     help="draw the top-level modules no class owns together in one box, the unowned group "
                          "(it owns nothing); by default each stands alone")
     ap.add_argument("--worklist", metavar="FILE",
@@ -1397,6 +1424,7 @@ def main():
                          "and shared data (amber), the most reached part first")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER)
     a = ap.parse_args()
+    opt = options(a, load_prefs())
     args = a.pytest_args[1:] if a.pytest_args[:1] == ["--"] else a.pytest_args
     rc, hits, objs = run(a.root, args, a.tests_dir)
     pairs = {}
@@ -1409,8 +1437,8 @@ def main():
     json.dump({"root": a.root, "pytest_exit": int(rc), "objects": objs, "edges": edges},
               open(a.out, "w"), indent=1)
     if a.spec:
-        spec = spec_of(objs, edges, a.root, a.concepts, a.data, static_uses(a.root, objs), a.root_owns,
-                       a.group_unowned)
+        spec = spec_of(objs, edges, a.root, opt["concepts"], opt["data"], static_uses(a.root, objs),
+                       opt["root_owns"], opt["group_unowned"])
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
             print(f"bypassed: {m['module']} ({m['why']})", file=sys.stderr)

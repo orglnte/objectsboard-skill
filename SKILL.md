@@ -159,7 +159,13 @@ Without either, start from the object the user's question is about.
 
 ## Steps
 
-0. Ask once whether the repo has a concept map or a Resources table (look
+0. Look for `.objectsboard.json` in the repo root first: it holds the
+   answers to this step from an earlier session (`{"data": ..., "concepts":
+   ..., "root_owns": ..., "group_unowned": ..., "arrows": "collapsed" |
+   "detailed"}`), and `trace_objects.py` reads it for every option its
+   command line leaves out. When it is there, show the saved answers in one
+   line, say how to change them (below) and skip the questions. Otherwise,
+   ask once whether the repo has a concept map or a Resources table (look
    for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
    Resources table only, so the board has data findings; a concept map,
    written by hand or with a concept-design skill, for the concept overlay;
@@ -174,11 +180,12 @@ Without either, start from the object the user's question is about.
       unowned group (not an owner; titled with the deepest folder they
       share)? Yes runs it with `--group-unowned`; no leaves each module
       box on its own.
-   After the questions, tell the user how to change the answers later: say
-   which one to change ("turn the unowned group on", "the root class owns
-   its package"), or ask to go through the questions again; the board is
-   then traced and redrawn with the new answers. The answers are not saved
-   anywhere but this conversation, so a new session asks again.
+   After the questions, write the answers to `.objectsboard.json` in the
+   repo root (never commit it: the user decides whether the repo keeps it
+   or ignores it) and tell the user how to change them later: say which one
+   to change ("turn the unowned group on", "the root class owns its
+   package"), or ask to go through the questions again; the file is
+   rewritten, and the board traced and redrawn with the new answers.
 1. Pick ONE object: the one the question is about, or the largest class or
    module on its path. In Python everything is an object: a module, a class
    or a function can be the target (`path/mod.py`, `path/mod.py:Name`). Never

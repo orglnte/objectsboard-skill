@@ -5,7 +5,7 @@
   /* layout: a full-height canvas with a toolbar on top and an inspector on the right (below the canvas on phones) */
   :root {
     --bg: #eceff1; --canvas: #f7f8f9; --grid: #e1e5e8; --panel: #ffffff; --ink: #1a1f24; --ink-2: #4b5560; --ink-3: #87909a;
-    --rule: #d0d6dc; --accent: #2563a6; --accent-fill: #dde9f6; --sel: #e0731b;
+    --rule: #d0d6dc; --accent: #2563a6; --accent-fill: #dde9f6; --sel: #0d9488;
     --k-object: #2563a6; --k-object-fill: #e6eef8; --k-module: #5b6b7a; --k-module-fill: #f2f4f6;
     --k-file: #7c5a12; --k-file-fill: #faf3e2; --k-process: #6a4fa3; --k-process-fill: #f1edf9;
     --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6;
@@ -17,7 +17,7 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #111417; --canvas: #161a1e; --grid: #1f252b; --panel: #1b2025; --ink: #e5e9ed; --ink-2: #a7b0ba; --ink-3: #6f7882;
-      --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #f59e0b;
+      --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #2dd4bf;
       --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
       --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
       --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
@@ -27,7 +27,7 @@
   }
   :root[data-theme="dark"] {
     --bg: #111417; --canvas: #161a1e; --grid: #1f252b; --panel: #1b2025; --ink: #e5e9ed; --ink-2: #a7b0ba; --ink-3: #6f7882;
-    --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #f59e0b;
+    --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #2dd4bf;
     --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
     --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
     --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
@@ -83,7 +83,7 @@
 
   /* svg */
   .node rect.box { stroke-width: 1.4; }
-  .node.sel rect.box { stroke: var(--sel) !important; stroke-width: 2.4; }
+  .node rect.selring { fill: none; stroke: var(--sel); stroke-width: 3; }
   .node.dim { opacity: .28; }
   .node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink); }
   .node text.title { font-family: var(--sans); font-size: 13px; font-weight: 600; }
@@ -164,7 +164,7 @@ const S = {
   db: null, local: false, list: [], did: null, d: null, saving: false, dirty: false, saveTimer: null,
   sel: null, selEdge: null, connectFrom: null, connecting: false, edgeOnlySel: false, labels: true,
   hide: new Set(), view: { x: 0, y: 0, k: 0.75 }, drag: null, armed: null,
-  undo: [], redo: [], base: null,
+  undo: [], redo: [], base: null, written: [],
 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -235,6 +235,7 @@ function render() {
     const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag)].join(" ");
     const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : "";
     g += `<g class="${cls}" data-n="${esc(n.id)}" transform="translate(${b.x},${b.y})">
+      ${n.id === S.sel ? `<rect class="selring" x="-5" y="-5" width="${b.w + 10}" height="${b.h + 10}" rx="10"></rect>` : ""}
       <rect class="box" width="${b.w}" height="${b.h}" rx="${n.kind === "file" ? 2 : 6}" style="fill:${cont ? `var(--k-${n.kind}-fill)` : c.f};stroke:${c.s}${cont ? ";fill-opacity:.55" : ""}"${dash}></rect>`;
     const ox = n.x - b.x, oy = n.y - b.y;
     g += `<text class="title" x="${ox + PAD}" y="${oy + 21}">${n.flag ? "⚠ " : ""}${esc(n.name)}</text>`;
@@ -401,7 +402,12 @@ async function save() {
   if (S.saving) { S.dirty = true; return; }
   S.saving = true; setStatus("saving…");
   try {
-    do { S.dirty = false; await S.db.collection("diagrams").doc(S.did).set(snapshot()); } while (S.dirty);
+    do {
+      S.dirty = false;
+      const doc = snapshot();
+      S.written.push(doc.updated); if (S.written.length > 50) S.written.shift();
+      await S.db.collection("diagrams").doc(S.did).set(doc);
+    } while (S.dirty);
     setStatus("saved");
   } catch (e) {
     setStatus(e && e.code === "quota_exceeded" ? "storage full" : "not saved: " + ((e && e.code) || "error"), true);
@@ -440,13 +446,15 @@ async function start() {
     if (busy || snap.metadata.hasPendingWrites) { bar(); return; }
     S.list = docs;
     const cur = docs.find(x => x.id === S.did);
-    if (cur) {
-      const mine = S.base && stable(plain(cur)) === stable(S.base);
+    if (cur && !S.written.includes(cur.updated)) {
+      // someone else's change: adopt it; an echo of this page's own write
+      // never replaces what the page holds, which may already be ahead of it
+      const same = S.base && stable(plain(cur)) === stable(S.base);
       S.d = structuredClone(plain(cur));
-      if (!mine) resetHistory();
+      if (!same) resetHistory();
       all();
     }
-    else pick(docs[0].id);
+    else if (!cur) pick(docs[0].id);
     setStatus("saved");
   }, err => setStatus("live updates stopped: " + err.code, true));
 }

@@ -180,8 +180,9 @@ green, and the board is redrawn before the next owner is decided.
    source names a class or function of the other box (followed through
    imports and re-exports; an unused import is no use), is a "uses" arrow,
    static only. Every box is drawn; one no call between project objects
-   reached at run time is marked UNOBSERVED. Top-level modules no class
-   owns go in the unowned group (box kind `unowned`): drawn together,
+   reached at run time is marked UNOBSERVED. With `--group-unowned`,
+   top-level modules no class owns go in the unowned group (box kind
+   `unowned`, titled with the deepest folder they share): drawn together,
    never an owner; findings, the worklist and the simplified
    view keep each member as a box of its own. `--worklist FILE` writes the refactoring
    worklist: private access (red) first, then owner bypasses and shared
@@ -329,7 +330,8 @@ cannot see is not evidence that nothing is there.
    several writers are flagged as shared). Placement from the code's
    structure only: the file's class, composition (a class kept as `self.x`,
    built directly or by a project factory function) and subclassing, then
-   the package's class (named after its folder, never the root), or a
+   the package's class (named after its folder; the root folder's only
+   with `--root-owns`, when the user says it owns its package), or a
    classless package's own `__init__` module; neither
    usage nor the concept map moves a box. With a concept map, the concepts
    are an overlay: labels, and flags for a concept spread over several

@@ -703,7 +703,7 @@ def is_exception(k, facts, seen=()):
     return any(b in ("BaseException", "Exception") or b.endswith(("Error", "Exception", "Warning")) for b in bases)
 
 
-def spec_of(objs, edges, root, concepts=None, data=None, static=None):
+def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=False, group=False):
     """The objects representation of the code as it is. Boxes and placement
     come from the code's structure, never from usage (usage only lists the
     bypasses) and never from the concept map (concepts do not translate
@@ -720,7 +720,8 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
     2. The package names its class: any other module, and a box class that
        rule 3 does not place, belongs to the box class named after its
        folder (`cell/` -> Cell, `variants/` -> Variant), or the nearest
-       enclosing folder's; never the root's. A package with no class
+       enclosing folder's; never the root's unless `root_owns` (the person
+       says the root folder's class owns its package). A package with no class
        holds its modules in its own `__init__` module, when that has code.
     3. A box class created and kept by exactly one other nests in it
        (`self.x = Other(...)`, or through a project factory function whose
@@ -750,7 +751,8 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
     between project objects reached at run time (for a module box: none in
     its file) is marked unobserved.
     `static` (from the source, `static_uses`) adds a "uses" arrow for a
-    pair of boxes the run never saw call each other."""
+    pair of boxes the run never saw call each other. `group` draws the
+    top-level modules no class owns in the unowned group."""
     rootp = Path(root)
     facts = class_facts(root)
     keep = {k for k, o in objs.items() if o["kind"] == "class"
@@ -773,6 +775,9 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
                 return k
         return None
 
+    def in_scope(d):                          # a folder whose class may own: the root's only when asked
+        return d == rootp and root_owns or d != rootp and rootp in d.parents
+
     def owner_of_file(f):
         """(owner class id or None, rule) for the code in file f."""
         p = Path(f)
@@ -780,7 +785,7 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
         if c:
             return c, 1
         for d in p.parents:
-            if d == rootp or rootp not in d.parents:
+            if not in_scope(d):
                 break
             c = primary_of_dir(d)
             if c:
@@ -832,7 +837,7 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
         if k in parent:
             continue
         for d in Path(objs[k]["file"]).parents:
-            if d == rootp or rootp not in d.parents:
+            if not in_scope(d):
                 break
             c = primary_of_dir(d)
             if c and c != k:
@@ -1213,7 +1218,8 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
                            "label": " · ".join(labs[:3]) + (f"  (+{len(labs) - 3})" if len(labs) > 3 else ""),
                            "proof": m["proof"][:1]})
     E[:] = keep_edges
-    group_unowned(nodes)
+    if group:
+        group_unowned(nodes)
     unmapped = overlay(concepts, objs, box, nodes, top) if concepts else []
     return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)],
             "unmapped": unmapped}
@@ -1221,12 +1227,14 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
 
 def group_unowned(nodes):
     """Put the top-level modules no class owns in one box of kind
-    "unowned". It is not an owner: no finding, worklist owner or simplified
-    view treats its members as its parts."""
+    "unowned", titled with the deepest folder they all sit in. It is
+    not an owner: no finding, worklist owner or simplified view treats its
+    members as its parts."""
     members = [n for n in nodes if n["kind"] == "module" and not n.get("parent")]
     if not members:
         return
-    nodes.append({"id": "unowned:group", "name": "unowned group", "kind": "unowned", "parent": None,
+    common = os.path.commonpath([str(Path(n["id"]).parent) for n in members])
+    nodes.append({"id": "unowned:group", "name": f"unowned group — {common}/", "kind": "unowned", "parent": None,
                   "note": "modules no class owns: drawn together, not owned"})
     for n in members:
         n["parent"] = "unowned:group"
@@ -1378,6 +1386,12 @@ def main():
     ap.add_argument("--data", help="optional: a markdown Resources table (Resource | Kind | Owner | Reached by) naming "
                                    "the data, without a concept map")
     ap.add_argument("--tests-dir", default="tests")
+    ap.add_argument("--root-owns", action="store_true",
+                    help="the class named after the root folder owns the root package's modules (a flat library: "
+                         "`shop/` -> Shop); by default the root folder's class owns nothing")
+    ap.add_argument("--group-unowned", action="store_true",
+                    help="draw the top-level modules no class owns together in one box, the unowned group "
+                         "(it owns nothing); by default each stands alone")
     ap.add_argument("--worklist", metavar="FILE",
                     help="with --spec: write the refactoring worklist: private access (red), then owner bypasses "
                          "and shared data (amber), the most reached part first")
@@ -1395,7 +1409,8 @@ def main():
     json.dump({"root": a.root, "pytest_exit": int(rc), "objects": objs, "edges": edges},
               open(a.out, "w"), indent=1)
     if a.spec:
-        spec = spec_of(objs, edges, a.root, a.concepts, a.data, static_uses(a.root, objs))
+        spec = spec_of(objs, edges, a.root, a.concepts, a.data, static_uses(a.root, objs), a.root_owns,
+                       a.group_unowned)
         json.dump(spec, open(a.spec, "w"), indent=1)
         for m in spec["moves"]:
             print(f"bypassed: {m['module']} ({m['why']})", file=sys.stderr)

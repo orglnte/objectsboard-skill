@@ -290,7 +290,7 @@ def test_objects_representation_rules(tmp_path):
     N = {n["id"]: n for n in s["nodes"]}
     assert "lib/shapes.py:Square" not in N and "lib/shapes.py" not in N   # subclass and helpers fold into Shape
     assert N["lib/report/fmt.py"]["parent"] == "lib/report/report.py:Report"   # report/ names Report
-    assert (N["lib/util.py"]["kind"], N["lib/util.py"]["parent"]) == ("module", "unowned:group")   # no class owns it
+    assert (N["lib/util.py"]["kind"], N["lib/util.py"]["parent"]) == ("module", None)   # the root owns nothing
     assert [(m["into"], m["other_users"]) for m in s["moves"] if m["module"] == "lib/report/fmt.py"] == [
         ("lib/report/report.py:Report", ["lib/util.py"])]                       # util goes around Report
     assert [n["kind"] for n in s["nodes"] if n["id"] == "resource:out/"] == ["folder"]
@@ -569,6 +569,53 @@ def test_the_simplified_view_keeps_the_unowned_groups_members_as_boxes():
     ids = {n["id"] for n in v["nodes"]}
     assert {"lib/errors.py", "lib/types.py", "unowned:group"} <= ids
     assert ("lib/u0.py:U0", "lib/errors.py") in {(e["from"], e["to"]) for e in v["edges"]}
+
+
+FLAT = {
+    "lib/__init__.py": "from lib.app import Lib\n",
+    "lib/app.py": "from lib.util import norm\n\n\nclass Lib:\n    def run(self, p):\n        return norm(p)\n",
+    "lib/util.py": "def norm(p):\n    return p.strip()\n",
+    "lib/cli.py": "from lib.util import norm\n\n\ndef main():\n    return norm(' x ')\n",
+}
+
+
+def _flat_spec(tmp_path, root_owns, group=True):
+    import trace_objects
+    for rel, text in FLAT.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        edges = [{"from": "lib/app.py:Lib", "to": "lib/util.py", "members": ["norm"]},
+                 {"from": "lib/cli.py", "to": "lib/util.py", "members": ["norm"]}]
+        return trace_objects.spec_of(objs, edges, "lib", root_owns=root_owns, group=group)
+    finally:
+        os.chdir(cwd)
+
+
+def test_the_root_folders_class_owns_nothing_unless_asked_and_the_group_names_the_package(tmp_path):
+    s = _flat_spec(tmp_path, False)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/util.py"]["parent"] == N["lib/cli.py"]["parent"] == "unowned:group"
+    assert N["unowned:group"]["name"] == "unowned group — lib/"           # all in the root package
+    s = _flat_spec(tmp_path, True)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/util.py"]["parent"] == N["lib/cli.py"]["parent"] == "lib/app.py:Lib"   # lib/ -> Lib
+    assert "unowned:group" not in N
+    s = _flat_spec(tmp_path, False, group=False)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["lib/util.py"]["parent"] is None and "unowned:group" not in N     # grouping only when asked
+
+
+def test_the_unowned_group_is_titled_with_the_deepest_folder_its_members_share():
+    import trace_objects
+    nodes = [{"id": "lib/sub/a.py", "name": "a.py", "kind": "module", "parent": None},
+             {"id": "lib/sub/deep/b.py", "name": "b.py", "kind": "module", "parent": None}]
+    trace_objects.group_unowned(nodes)
+    assert [n["name"] for n in nodes if n["kind"] == "unowned"] == ["unowned group — lib/sub/"]
 
 
 def _box(i, x, y, parent=None):

@@ -55,8 +55,9 @@ an exception), every box drawn even when no arrow reaches it, one arrow
 per pair of boxes that call each other at run time (a dotted "uses" arrow
 when only the source names the other box: an import or a name, no call
 seen), a box no call between project objects reached at run time marked
-UNOBSERVED, modules no class holds as module boxes of their own, drawn
-together in the **unowned group** (a box that is not an owner), and the **resources (data)**: the files,
+UNOBSERVED, modules no class holds as module boxes of their own (drawn
+together in the **unowned group**, a box that is not an owner, when the
+user asks for it in step 0: `--group-unowned`), and the **resources (data)**: the files,
 folders and external systems the code keeps data in or drives, named with
 the code patterns that reach them in a Resources table (Resource | Kind |
 Owner | Reached by), in its own file (`--data`) or in the concept map.
@@ -87,7 +88,9 @@ documentation, not an input.
    function `make` returns `Other(...)`); a subclass folds into its base.
 3. The package names its class: any other module, and a box class no one
    class keeps, belongs to the class named after its folder (`cell/` ->
-   Cell), or the nearest enclosing folder's, never the root's. A package
+   Cell), or the nearest enclosing folder's; the root folder's class only
+   when the user says it owns its package (`--root-owns`, asked in step 0).
+   A package
    with no class holds its modules in its own `__init__` module, when that
    has code of its own.
 4. Everything else is external.
@@ -160,7 +163,15 @@ Without either, start from the object the user's question is about.
    for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
    Resources table only, so the board has data findings; a concept map,
    written by hand or with a concept-design skill, for the concept overlay;
-   or neither. Never block on it.
+   or neither. Never block on it. In the same turn, ask two placement
+   questions, both off by default:
+   1. Does the class named after the root folder own the root package's
+      modules (a flat library whose package is its one object, `shop/` ->
+      Shop)? Yes runs the tracer with `--root-owns`.
+   2. Should the modules no class owns be drawn together in one box, the
+      unowned group (not an owner; titled with the deepest folder they
+      share)? Yes runs it with `--group-unowned`; no leaves each module
+      box on its own.
 1. Pick ONE object: the one the question is about, or the largest class or
    module on its path. In Python everything is an object: a module, a class
    or a function can be the target (`path/mod.py`, `path/mod.py:Name`). Never

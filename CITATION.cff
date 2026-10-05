@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use or adapt objectsboard, please cite it as below."
+title: "objectsboard: a Claude Code skill for separation of concerns, encapsulation and abstraction"
+type: software
+authors:
+  - alias: orglnte
+repository-code: "https://github.com/orglnte/objectsboard-skill"
+url: "https://github.com/orglnte/objectsboard-skill"
+license: Apache-2.0
+date-released: "2026-10-05"
+keywords:
+  - software architecture
+  - encapsulation
+  - separation of concerns
+  - refactoring
+  - coding agents
+references:
+  - type: blog
+    title: "Interactive architecture refactoring with coding agents"
+    authors:
+      - alias: AyeyeBrz
+    url: "https://medium.com/@ayeyebrz/interactive-architecture-refactoring-with-coding-agents-b8af78cd477b"
+    year: 2026

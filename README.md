@@ -62,3 +62,9 @@ Then `/objectsboard` in Claude Code.
 9. `tools/objects-board.html`: the board, published as a claude.ai artifact
    with a shared database (`capabilities: {db: {}}`).
 10. `tests/`: `python3 -m pytest tests -q`.
+
+## License and citation
+
+Apache-2.0: see [LICENSE](LICENSE). Redistributions carry [NOTICE](NOTICE).
+To cite or credit the skill and its method, use
+[CITATION.cff](CITATION.cff) (GitHub's "Cite this repository").

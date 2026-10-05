@@ -568,8 +568,8 @@ def collapse(d):
 def simplify(d):
     N = {n["id"]: n for n in d["nodes"]}
 
-    def top(i):
-        while N[i].get("parent"):
+    def top(i):                               # the unowned group is no owner
+        while N[i].get("parent") and N[N[i]["parent"]].get("kind") != "unowned":
             i = N[i]["parent"]
         return i
 
@@ -578,7 +578,7 @@ def simplify(d):
 
     out = {"name": d["name"] + " — simplified", "nodes": [], "edges": []}
     for n in d["nodes"]:
-        if n.get("parent"):
+        if top(n["id"]) != n["id"]:
             continue
         s = {k: v for k, v in n.items() if k not in ("w", "h")}
         kids = inside(n["id"])

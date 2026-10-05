@@ -531,6 +531,47 @@ def test_every_box_is_drawn_and_a_pair_the_run_never_saw_is_a_static_arrow(tmp_p
     assert (uses["kind"], uses["label"]) == ("uses", "Spec")
 
 
+def _unowned_spec():
+    users = [f"lib/u{i}.py:U{i}" for i in range(5)]
+    nodes = [{"id": u, "name": u.split(":")[1], "kind": "object", "parent": None, "note": ""} for u in users]
+    nodes += [{"id": f"lib/{m}.py", "name": f"{m}.py", "kind": "module", "parent": None, "note": f"lib/{m}.py"}
+              for m in ("errors", "types", "engine")]
+    edges = [{"from": u, "to": "lib/errors.py", "kind": "calls", "label": "fail"} for u in users]
+    edges += [{"from": u, "to": "lib/types.py", "kind": "uses", "label": "Kind"} for u in users]
+    edges += [{"from": u, "to": "lib/engine.py", "kind": "calls", "label": "run"} for u in users]
+    edges += [{"from": "lib/engine.py", "to": u, "kind": "calls", "label": "hook"} for u in users[:2]]
+    edges[0]["flag"] = "private: reaches _fail of errors.py from outside it"
+    for e in edges:
+        e["proof"] = []
+    return {"name": "x", "nodes": nodes, "edges": edges}
+
+
+def test_modules_many_reach_and_that_reach_little_go_in_the_unowned_group():
+    import trace_objects
+    s = _unowned_spec()
+    trace_objects.group_unowned(s["nodes"], s["edges"])
+    P = {n["id"]: n.get("parent") for n in s["nodes"]}
+    assert P["lib/errors.py"] == P["lib/types.py"] == "unowned:group"
+    assert P["lib/engine.py"] is None                                  # it reaches two boxes: stays out
+    assert [n["kind"] for n in s["nodes"] if n["id"] == "unowned:group"] == ["unowned"]
+    w = trace_objects.worklist(s)
+    assert [(g["part"], g["owner"]) for g in w] == [("errors.py", "errors.py")]   # the group owns nothing
+    one = _unowned_spec()
+    one["edges"] = [e for e in one["edges"] if e["to"] != "lib/types.py"]
+    trace_objects.group_unowned(one["nodes"], one["edges"])
+    assert not any(n["kind"] == "unowned" for n in one["nodes"])        # a group of one is no group
+
+
+def test_the_simplified_view_keeps_the_unowned_groups_members_as_boxes():
+    import trace_objects
+    s = _unowned_spec()
+    trace_objects.group_unowned(s["nodes"], s["edges"])
+    v = board.simplify(s)
+    ids = {n["id"] for n in v["nodes"]}
+    assert {"lib/errors.py", "lib/types.py", "unowned:group"} <= ids
+    assert ("lib/u0.py:U0", "lib/errors.py") in {(e["from"], e["to"]) for e in v["edges"]}
+
+
 def _box(i, x, y, parent=None):
     return {"id": i, "name": i, "kind": "object", "members": [], "note": "", "parent": parent, "x": x, "y": y}
 

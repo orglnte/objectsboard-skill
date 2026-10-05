@@ -1213,9 +1213,41 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None):
                            "label": " · ".join(labs[:3]) + (f"  (+{len(labs) - 3})" if len(labs) > 3 else ""),
                            "proof": m["proof"][:1]})
     E[:] = keep_edges
+    group_unowned(nodes, E)
     unmapped = overlay(concepts, objs, box, nodes, top) if concepts else []
     return {"name": f"{root} — objects", "nodes": nodes, "edges": E, "moves": [moves[k] for k in sorted(moves)],
             "unmapped": unmapped}
+
+
+UNOWNED_IN, UNOWNED_OUT = 5, 1
+
+
+def group_unowned(nodes, edges):
+    """Put the top-level modules no class owns that many boxes reach
+    (UNOWNED_IN or more) and that reach few (UNOWNED_OUT at most) in one
+    box of kind "unowned". It is not an owner: no finding, worklist owner or
+    simplified view treats its members as its parts."""
+    N = {n["id"]: n for n in nodes}
+
+    def top(i):
+        while N.get(i, {}).get("parent"):
+            i = N[i]["parent"]
+        return i
+
+    fan_in, fan_out = {}, {}
+    for e in edges:
+        a, b = top(e["from"]), top(e["to"])
+        if a != b and not b.startswith("resource:"):
+            fan_in.setdefault(b, set()).add(a)
+            fan_out.setdefault(a, set()).add(b)
+    members = [n for n in nodes if n["kind"] == "module" and not n.get("parent")
+               and len(fan_in.get(n["id"], ())) >= UNOWNED_IN and len(fan_out.get(n["id"], ())) <= UNOWNED_OUT]
+    if len(members) < 2:
+        return
+    nodes.append({"id": "unowned:group", "name": "unowned group", "kind": "unowned", "parent": None,
+                  "note": f"modules no class owns, reached by {UNOWNED_IN}+ boxes, reaching {UNOWNED_OUT} at most"})
+    for n in members:
+        n["parent"] = "unowned:group"
 
 
 def overlay(concepts, objs, box, nodes, top):
@@ -1268,8 +1300,8 @@ def worklist(spec):
     reaches it and its call sites (file:line)."""
     N = {n["id"]: n for n in spec["nodes"]}
 
-    def top(i):
-        while N.get(i, {}).get("parent"):
+    def top(i):                               # the unowned group is no owner
+        while N.get(i, {}).get("parent") and N[N[i]["parent"]].get("kind") != "unowned":
             i = N[i]["parent"]
         return i
 

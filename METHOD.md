@@ -180,7 +180,11 @@ green, and the board is redrawn before the next owner is decided.
    source names a class or function of the other box (followed through
    imports and re-exports; an unused import is no use), is a "uses" arrow,
    static only. Every box is drawn; one no call between project objects
-   reached at run time is marked UNOBSERVED. `--worklist FILE` writes the refactoring
+   reached at run time is marked UNOBSERVED. Top-level modules no class
+   owns that 5 or more boxes reach and that reach 1 box at most go in the
+   unowned group (box kind `unowned`, when two or more qualify): drawn
+   together, never an owner; findings, the worklist and the simplified
+   view keep each member as a box of its own. `--worklist FILE` writes the refactoring
    worklist: private access (red) first, then owner bypasses and shared
    data (amber); one entry per part, the most reached first, with every
    arrow into it and its call sites (file:line, read from the code's

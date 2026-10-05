@@ -8,7 +8,7 @@
     --rule: #d0d6dc; --accent: #2563a6; --accent-fill: #dde9f6; --sel: #0d9488;
     --k-object: #2563a6; --k-object-fill: #e6eef8; --k-module: #5b6b7a; --k-module-fill: #f2f4f6;
     --k-file: #7c5a12; --k-file-fill: #faf3e2; --k-process: #6a4fa3; --k-process-fill: #f1edf9;
-    --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6;
+    --k-folder: #7c5a12; --k-folder-fill: #fdf9ef; --k-external: #6b7280; --k-external-fill: #f3f4f6; --k-unowned: #8a939c; --k-unowned-fill: #fafbfb;
     --e-calls: #2563a6; --e-reads: #2f8a57; --e-writes: #c2410c; --e-spawns: #6a4fa3; --e-uses: #6b7280; --unobs: #9a6b00; --unobs-fill: #fbf4e0;
     --exp: #b45309; --warn: #d4261c; --amber: #b7791f; --grey: #b9c0c7; --grey-fill: #eef0f2;
     --sans: "Fira Sans", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
@@ -20,7 +20,7 @@
       --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #2dd4bf;
       --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
       --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
-      --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
+      --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326; --k-unowned: #7d8791; --k-unowned-fill: #181c20;
       --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --e-uses: #a0a8b2; --unobs: #d9a740; --unobs-fill: #2a2416; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d; --grey: #4b535b; --grey-fill: #1d2125;
       color-scheme: dark;
     }
@@ -30,7 +30,7 @@
     --rule: #2e353c; --accent: #7fb0e6; --accent-fill: #1c2a3a; --sel: #2dd4bf;
     --k-object: #7fb0e6; --k-object-fill: #1b2733; --k-module: #9aa8b5; --k-module-fill: #1e2328;
     --k-file: #d6ad5c; --k-file-fill: #2a2416; --k-process: #b39ae6; --k-process-fill: #231d33;
-    --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326;
+    --k-folder: #d6ad5c; --k-folder-fill: #1f1b12; --k-external: #9ca3af; --k-external-fill: #202326; --k-unowned: #7d8791; --k-unowned-fill: #181c20;
     --e-calls: #7fb0e6; --e-reads: #6fcf97; --e-writes: #f08a5d; --e-spawns: #b39ae6; --e-uses: #a0a8b2; --unobs: #d9a740; --unobs-fill: #2a2416; --exp: #f0a35c; --warn: #ff6b5e; --amber: #f2b33d;
     color-scheme: dark;
   }
@@ -161,7 +161,7 @@
 </div>
 
 <script>
-const KINDS = ["object", "module", "process", "file", "folder", "external"];
+const KINDS = ["object", "module", "unowned", "process", "file", "folder", "external"];
 // a private name reached from outside its container is red; a part reached
 // around its owner, data with several writers and a doubt about an owner are amber
 const sev = f => !f ? "" : /^private:|— private:/.test(f) ? "" : /^(owner bypass|shared|doubt)|— (owner bypass|shared)/.test(f) ? "amber" : "";
@@ -174,7 +174,7 @@ const EKINDS = [
 ];
 // what each chip means, shown as its tooltip
 const ELABEL = { calls: "calls", reads: "reads data", writes: "writes data", spawns: "starts a process", uses: "static only" };
-const BLABEL = { object: "class (owner)", module: "module", process: "process", file: "file (data)", folder: "folder (data)", external: "external system" };
+const BLABEL = { object: "class (owner)", module: "module", process: "process", file: "file (data)", folder: "folder (data)", external: "external system", unowned: "unowned group" };
 const FLAGS = [
   { k: "red", label: "private access", c: "var(--warn)", mean: "a name starting with an underscore reached from outside its module, class or package" },
   { k: "amber", label: "owner bypass / shared", c: "var(--amber)", mean: "a public path to a part its owner doesn't expose, or data with several writers, or another owner's data reached directly" },
@@ -193,6 +193,7 @@ const BMEAN = {
   file: "data kept in one file",
   folder: "data kept in a folder",
   external: "a system outside the code that it keeps data in or drives (a container engine, a service)",
+  unowned: "modules no class owns that many boxes use: drawn together, not owned; it is not an owner",
 };
 const S = {
   db: null, local: false, list: [], did: null, d: null, saving: false, dirty: false, saveTimer: null,
@@ -268,7 +269,7 @@ function render() {
     const b = L[n.id], c = kindColors(n.kind), cont = children(n.id).length > 0;
     const dim = S.sel && S.edgeOnlySel === false && rel.size && !rel.has(n.id) && n.id !== S.sel && !isDesc(S.sel, n.id, B) && !isDesc(n.id, S.sel, B) && !cont;
     const cls = ["node", n.id === S.sel ? "sel" : "", dim ? "dim" : "", S.drag && S.drag.over === n.id ? "droptarget" : "", n.flag ? "flagged" : "", sev(n.flag), S.greyKinds.has(n.kind) ? "grey" : "", n.unobserved ? "unobserved" : "", n.unobserved && S.fadeUnobs ? "faded" : ""].join(" ");
-    const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : "";
+    const dash = n.kind === "folder" || n.kind === "process" ? ` stroke-dasharray="6 4"` : n.kind === "unowned" ? ` stroke-dasharray="2 4"` : "";
     g += `<g class="${cls}" data-n="${esc(n.id)}" transform="translate(${b.x},${b.y})">
       ${n.id === S.sel ? `<rect class="selring" x="-5" y="-5" width="${b.w + 10}" height="${b.h + 10}" rx="10"></rect>` : ""}
       <rect class="box" width="${b.w}" height="${b.h}" rx="${n.kind === "file" ? 2 : 6}" style="fill:${cont ? `var(--k-${n.kind}-fill)` : c.f};stroke:${c.s}${cont ? ";fill-opacity:.55" : ""}"${dash}></rect>`;
@@ -394,7 +395,7 @@ function bar() {
     + FLAGS.map(f => `<span class="kt ${S.hideFlags.has(f.k) ? "off" : ""}" data-f="${f.k}" style="--c:${f.c}" role="button" tabindex="0" aria-pressed="${!S.hideFlags.has(f.k)}" title="${esc(f.mean)}"><i></i>${f.label}</span>`).join("")
     + `<span class="kt ${S.fadeUnobs ? "off" : ""}" data-u="1" style="--c:var(--unobs);--f:var(--unobs-fill)" role="button" tabindex="0" aria-pressed="${!S.fadeUnobs}" title="a box no call between project objects reached at run time; click to fade them"><b style="border-style:dashed"></b>unobserved</span>`
     + `<span class="kt sep" aria-hidden="true"></span>`
-    + KINDS.map(k => `<span class="kt ${k === "folder" || k === "process" ? "dash" : ""} ${S.greyKinds.has(k) ? "off" : ""}" data-b="${k}" style="--c:var(--k-${k});--f:var(--k-${k}-fill)" role="button" tabindex="0" aria-pressed="${!S.greyKinds.has(k)}" title="${esc(BMEAN[k] || k)}"><b></b>${BLABEL[k] || k}</span>`).join("");
+    + KINDS.map(k => `<span class="kt ${k === "folder" || k === "process" || k === "unowned" ? "dash" : ""} ${S.greyKinds.has(k) ? "off" : ""}" data-b="${k}" style="--c:var(--k-${k});--f:var(--k-${k}-fill)" role="button" tabindex="0" aria-pressed="${!S.greyKinds.has(k)}" title="${esc(BMEAN[k] || k)}"><b></b>${BLABEL[k] || k}</span>`).join("");
   $("connect").classList.toggle("on", S.connecting);
   $("undo").disabled = !S.undo.length; $("redo").disabled = !S.redo.length;
   $("edgemode").textContent = S.edgeOnlySel ? "Selected box's arrows" : "All arrows";

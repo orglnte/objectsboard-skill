@@ -280,7 +280,7 @@ def test_objects_representation_rules(tmp_path):
     N = {n["id"]: n for n in s["nodes"]}
     assert "lib/shapes.py:Square" not in N and "lib/shapes.py" not in N   # subclass and helpers fold into Shape
     assert N["lib/report/fmt.py"]["parent"] == "lib/report/report.py:Report"   # report/ names Report
-    assert N["lib/util.py"]["kind"] == "external"                              # the root folder owns nothing
+    assert (N["lib/util.py"]["kind"], N["lib/util.py"]["parent"]) == ("module", None)   # the root owns nothing
     assert [(m["into"], m["other_users"]) for m in s["moves"] if m["module"] == "lib/report/fmt.py"] == [
         ("lib/report/report.py:Report", ["lib/util.py"])]                       # util goes around Report
     assert [n["kind"] for n in s["nodes"] if n["id"] == "resource:out/"] == ["folder"]

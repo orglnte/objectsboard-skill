@@ -313,7 +313,7 @@ cannot see is not evidence that nothing is there.
    slice.
 6. **Whole codebase (the objects representation):** the code as it is.
    Classes with behaviour of their own as boxes, one arrow per pair,
-   modules no class holds as external boxes, and the resources (data)
+   modules no class holds as module boxes of their own, and the resources (data)
    named in a Resources table (`--data`, or the concept map's), with an arrow from every box whose
    code reaches one directly (a bypass unless it is the data's only writer;
    several writers are flagged as shared). Placement from the code's

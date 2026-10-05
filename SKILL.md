@@ -52,7 +52,7 @@ the code **as it is**: `tools/trace_objects.py --spec ...`, with
 Boxes are the classes with behaviour of their own (a public
 method; not a value class such as a dataclass, NamedTuple or Enum, and not
 an exception), one arrow per pair of boxes that call each other, modules no
-class holds as external boxes, and the **resources (data)**: the files,
+class holds as module boxes of their own, and the **resources (data)**: the files,
 folders and external systems the code keeps data in or drives, named with
 the code patterns that reach them in a Resources table (Resource | Kind |
 Owner | Reached by), in its own file (`--data`) or in the concept map.

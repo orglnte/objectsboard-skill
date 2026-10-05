@@ -170,7 +170,7 @@ const EKINDS = [
 ];
 // what each chip means, shown as its tooltip
 const ELABEL = { calls: "calls", reads: "reads data", writes: "writes data", spawns: "starts a process" };
-const BLABEL = { object: "class (owner)", module: "module", process: "process", file: "file (data)", folder: "folder (data)", external: "external code" };
+const BLABEL = { object: "class (owner)", module: "module", process: "process", file: "file (data)", folder: "folder (data)", external: "external system" };
 const FLAGS = [
   { k: "red", label: "private access", c: "var(--warn)", mean: "a name starting with an underscore reached from outside its module, class or package" },
   { k: "amber", label: "owner bypass / shared", c: "var(--amber)", mean: "a public path to a part its owner doesn't expose, or data with several writers, or another owner's data reached directly" },
@@ -183,11 +183,11 @@ const EMEAN = {
 };
 const BMEAN = {
   object: "a class with behaviour of its own: an owner. A box inside another is owned by it",
-  module: "functions with no class, inside the owner whose package holds them",
+  module: "functions with no class: inside the box whose class owns them, on its own when no class does",
   process: "a separate process",
   file: "data kept in one file",
   folder: "data kept in a folder",
-  external: "code no owner holds",
+  external: "a system outside the code that it keeps data in or drives (a container engine, a service)",
 };
 const S = {
   db: null, local: false, list: [], did: null, d: null, saving: false, dirty: false, saveTimer: null,

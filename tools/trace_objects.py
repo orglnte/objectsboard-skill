@@ -904,7 +904,7 @@ def spec_of(objs, edges, root, concepts=None, data=None):
         else:
             f = Path(b)
             label = (str(f.parent) + "/") if f.name == "__init__.py" else f.name
-            nodes.append({"id": b, "name": label, "kind": "module" if b in parent else "external",
+            nodes.append({"id": b, "name": label, "kind": "module",
                           "parent": parent.get(b), "note": b})
     E = []
     for (a, b), ms in sorted(pairs.items()):
@@ -936,7 +936,7 @@ def spec_of(objs, edges, root, concepts=None, data=None):
         if a not in {n["id"] for n in nodes}:
             o = objs.get(a, {"name": Path(a).stem, "file": a, "kind": "module"})
             nodes.append({"id": a, "name": o["name"] if o.get("kind") == "class" else Path(o["file"]).name,
-                          "kind": "object" if o.get("kind") == "class" else ("module" if a in parent else "external"),
+                          "kind": "object" if o.get("kind") == "class" else "module",
                           "parent": parent.get(a), "note": o["file"]})
         if not any(e["from"] == a and e["to"] == pid for e in E):
             E.append({"from": a, "to": pid, "kind": "spawns", "label": "starts it",
@@ -1058,7 +1058,7 @@ def spec_of(objs, edges, root, concepts=None, data=None):
                 f = Path(o["file"])
                 nodes.append({"id": src, "name": o["name"] if o.get("kind") == "class" else
                               ((str(f.parent) + "/") if f.name == "__init__.py" else f.name),
-                              "kind": "object" if o.get("kind") == "class" else ("module" if src in parent else "external"),
+                              "kind": "object" if o.get("kind") == "class" else "module",
                               "parent": parent.get(src), "note": o["file"]})
                 N[src] = nodes[-1]
             w = sorted(writers.get(ri, set()))

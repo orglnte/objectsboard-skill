@@ -95,6 +95,46 @@ happens to call what; usage only marks the crossings. Where the structure
 and the usage name different owners (an owner that never uses its module),
 the box is a doubt for the user to settle.
 
+## The State table (optional)
+
+The board shows who may touch what; the State table shows what can happen
+over time. Boxes are classes, not instances, and an arrow says one box
+calls another, not which thread, task, process or session makes the call:
+two actors writing one datum over a single arrow multiply the orderings
+without adding an arrow. The table is written by hand from the code, when
+the user says yes in step 0; the tools do not read it.
+
+One row per piece of mutable state that outlives a call: an attribute
+written after construction, a module-level variable, a resource from the
+Resources table.
+
+| Owner | State | Key | Writers | Lifecycle | Invariant | Cross-process writes |
+|---|---|---|---|---|---|---|
+| `Cart` | items | user | request handlers (threads), one per open session | created on the first add; emptied at checkout | the total is the sum of the item prices | none |
+
+1. **Key:** the identity the state is kept under: process, instance,
+   session, user, tenant, service, or global.
+2. **Writers:** every actor that changes it, with its kind: thread, async
+   task (tasks interleave at each `await`), process, instance, session,
+   timer, signal handler, retry, operator, another service.
+3. **Lifecycle:** what creates it, what resets it, what ends it.
+4. **Invariant:** what must stay true about it, in one sentence.
+5. **Cross-process writes:** for a write that leaves the process, whether
+   it is idempotent and who retries it.
+
+Its findings are reported as checkable facts, with file and line, next to
+the worklist:
+
+1. A datum two or more actors write: the orderings of their steps
+   multiply there.
+2. A writer deciding under another key than its data's (the example
+   above: each session empties the cart kept per user).
+3. An empty Invariant: the owner protects nothing it has stated.
+4. A lifecycle with no end, or a restart that does not reset.
+5. A cross-process write that is retried and not idempotent.
+
+On each redraw, update the rows of the owners the change touched.
+
 ## Why one object at a time
 
 Seeing is the whole codebase at once: the board and its worklist show every
@@ -277,7 +317,10 @@ cannot see is not evidence that nothing is there.
    (`path`, `get`, `open`, …) is never followed.
 4. **File scan (`file_contracts.py`):** a file name built at run time (only
    quoted names are matched).
-5. **Everything:** Python only. Other languages need the interface and its
+5. **State and actors:** which instance, thread, task, process or session
+   makes a call, and any mutable state; the State table, written by hand,
+   holds them.
+6. **Everything:** Python only. Other languages need the interface and its
    uses gathered by hand; the method and the board still apply.
 
 ## Keeping the diagrams true

@@ -32,6 +32,10 @@ It covers:
 4. **Architectural review:** patterns and antipatterns found in the code,
    and, with a concept map, dark concepts (a concept whose effect surprises
    its user, or that acts silently) and colliding names.
+5. **State, optional:** with a State table, each piece of mutable state
+   with the key it is kept under, the actors that write it, its lifecycle
+   and the invariant it protects; a datum two or more actors write, and a
+   writer deciding under another key than its data's, are findings.
 
 ## Requirements
 
@@ -156,17 +160,21 @@ The code and its test suite. Optional:
    included, written by hand or produced with a concept-design skill such
    as [concept-skills](https://github.com/ontology-of-everything/concept-skills)
    (`--concepts`).
+3. A State table (Owner | State | Key | Writers | Lifecycle | Invariant |
+   Cross-process writes): the mutable state, who writes it and what it
+   must keep true, written by hand from the code, in the concept map or in
+   its own file (METHOD.md, "The State table"). The tools do not read it.
 
-Without either, start from the object the user's question is about.
+Without any of them, start from the object the user's question is about.
 
 ## Steps
 
 0. Look for `.objectsboard.json` in the repo root first: it holds the
    answers to this step from an earlier session (`{"data": ..., "concepts":
    ..., "root_owns": ..., "group_unowned": ..., "group_resources": ...,
-   "exclude": [folders],
+   "exclude": [folders], "state": file | null,
    "arrows": "collapsed" | "detailed"}`), and `trace_objects.py` reads it for every option its
-   command line leaves out. When it is there, show the saved answers in one
+   command line leaves out (`state` is for the skill only). When it is there, show the saved answers in one
    line, say how to change them (below) and skip the questions. Otherwise,
    ask once whether the repo has a concept map or a Resources table (look
    for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
@@ -190,6 +198,15 @@ Without either, start from the object the user's question is about.
    4. Any folders to leave out (vendored code, generated code, examples)?
       They go in `exclude` (`--exclude DIR`, paths from the repo root) and
       are left out of every scan: no box, no arrow, no call traced.
+   5. Should the board come with a State table: one row per piece of
+      mutable state, with the key it is kept under, the actors that write
+      it (threads, tasks, processes, instances, sessions), its lifecycle
+      and the invariant it protects? Say what yes means: the table is
+      written by hand from the code and finds what arrows cannot (a datum
+      two actors write, a decision made under another key than its
+      data's); it is updated on every redraw. Yes saves its file in
+      `state` (the concept map, or `docs/STATE-<repo>.md`); no leaves it
+      out.
    After the questions, write the answers to `.objectsboard.json` in the
    repo root (never commit it: the user decides whether the repo keeps it
    or ignores it) and tell the user how to change them later: say which one

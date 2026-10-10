@@ -812,7 +812,53 @@ def resource_rows(map_file):
     return rows
 
 
-WRITES = re.compile(r"write_text|write_bytes|\.write\(|mkdir|rename|unlink|touch|\.save\(|open\([^)]*[\"'][wa]")
+WRITES = re.compile(r"write_text|write_bytes|\.write\(|mkdir|rename|unlink|touch|\.save\(|open\([^)]*[\"'][wa]"
+                    r"|\]\s*=(?!=)|\.setdefault\(|\.update\(|\.pop\(|\.clear\(|^\s*del\s")
+PATH_CALLS = {"Path", "PurePath", "PosixPath", "WindowsPath", "join", "joinpath", "with_suffix", "with_name", "with_stem",
+              "resolve", "absolute", "expanduser", "abspath", "realpath", "normpath", "dirname", "fspath", "str",
+              "glob", "rglob", "iterdir"}
+
+
+def path_names(fn, ln, helpers=()):
+    """The names in function fn that hold the path built on line ln, and the
+    names built from them by path operations (`/`, `Path()`, `with_suffix`,
+    `glob`, a helper that returns a path, ...). A name a call loads into
+    (`config = load(path)`) holds content, not the path."""
+    calls = PATH_CALLS | set(helpers)
+
+    def builds_path(expr):
+        return expr is not None and all(
+            not isinstance(c, ast.Call) or (c.func.id if isinstance(c.func, ast.Name) else
+                                            getattr(c.func, "attr", None)) in calls for c in ast.walk(expr))
+
+    def names(target):
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return {n for t in target.elts for n in names(t)}
+        return {ast.unparse(target)} if isinstance(target, (ast.Name, ast.Attribute)) else set()
+
+    binds = []
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Assign):
+            binds.append((n, {x for t in n.targets for x in names(t)}, n.value))
+        elif isinstance(n, ast.AnnAssign):
+            binds.append((n, names(n.target), n.value))
+        elif isinstance(n, (ast.For, ast.AsyncFor)):
+            binds.append((n, names(n.target), n.iter))
+    binds.sort(key=lambda b: b[0].lineno)
+    held = set()
+    for n, targets, value in binds:
+        if n.lineno <= ln <= (n.end_lineno if isinstance(n, (ast.Assign, ast.AnnAssign)) else n.iter.end_lineno) \
+                and builds_path(value):
+            held |= targets
+    grew = bool(held)
+    while grew:
+        grew = False
+        for n, targets, value in binds:
+            if targets - held and builds_path(value) and any(
+                    re.search(r"(?<![\w.])" + re.escape(h) + r"\b", ast.unparse(value)) for h in held):
+                held |= targets
+                grew = True
+    return held
 
 
 def is_exception(k, facts, seen=()):
@@ -1204,18 +1250,25 @@ def spec_of(objs, edges, root, concepts=None, data=None, static=None, root_owns=
                 continue
             spans = [(c.lineno, c.end_lineno, c.name) for c in ast.walk(tree) if isinstance(c, ast.ClassDef)]
             lines_ = text.splitlines()
-            fspans = [(f.lineno, f.end_lineno) for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            fnodes = [f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
             def writes_near(ln):
-                """A write in the innermost function around line ln, else on
-                the line; when the line keeps the path in a name (`self.x =`,
-                `X =`), a write through that name in the same class or module."""
-                inner = [f for f in fspans if f[0] <= ln <= f[1]]
-                a, b = min(inner, key=lambda f: f[1] - f[0]) if inner else (ln, ln)
-                if any(WRITES.search(x) for x in lines_[a - 1:b] if not x.lstrip().startswith("#")):
+                """A write on line ln; or, in the innermost function around it,
+                a write through a name that holds the path line ln builds; or,
+                when the line keeps the path in an attribute or a module name
+                (`self.x =`, `X =`), a write through it in the same class or
+                module."""
+                if WRITES.search(lines_[ln - 1]):
                     return True
+                inner = [f for f in fnodes if f.lineno <= ln <= f.end_lineno]
+                fn = min(inner, key=lambda f: f.end_lineno - f.lineno) if inner else None
+                if fn is not None:
+                    held = [re.compile(r"(?<![\w.])" + re.escape(n) + r"\b") for n in path_names(fn, ln, helpers)]
+                    if held and any(WRITES.search(x) and any(h.search(x) for h in held)
+                                    for x in lines_[fn.lineno - 1:fn.end_lineno] if not x.lstrip().startswith("#")):
+                        return True
                 m = re.match(r"\s*((?:self\.)?\w+)\s*(?::[^=]*)?=[^=]", lines_[ln - 1])
-                if not m:
+                if not m or fn is not None and not m.group(1).startswith("self."):
                     return False
                 cls = [c for c in spans if c[0] <= ln <= c[1]]
                 a, b = (min(cls, key=lambda c: c[1] - c[0])[:2]) if cls and m.group(1).startswith("self.") else (1, len(lines_))

@@ -1049,6 +1049,38 @@ def test_data_written_through_a_helper_that_returns_its_path_is_its_callers(tmp_
     assert N["resource:out/"]["note"] == "no single owner: written by dump.py, Store"   # both write through out_dir()
 
 
+def test_a_write_counts_for_the_data_whose_path_it_goes_through_not_for_all_the_function_reaches(tmp_path):
+    import trace_objects
+    files = {
+        "lib/__init__.py": "",
+        "lib/settings.py": "def load_settings(path):\n    return path\n",
+        "lib/cli.py": ("import os\nfrom lib.settings import load_settings\n\n\ndef save(settings_path, text):\n"
+                       "    settings = load_settings(settings_path)\n    out = settings.out_dir / \"cache.json\"\n"
+                       "    tmp = out.with_suffix(\".tmp\")\n    tmp.write_text(text)\n    os.replace(tmp, out)\n\n\n"
+                       "def mode():\n    return os.environ.get(\"MODE\")\n"),
+        "lib/env.py": "import os\n\n\ndef prepare():\n    os.environ[\"MODE\"] = \"fast\"\n",
+    }
+    for rel, text in files.items():
+        q = tmp_path / rel
+        q.parent.mkdir(parents=True, exist_ok=True)
+        q.write_text(text)
+    (tmp_path / "DATA.md").write_text("| Resource | Kind | Owner | Reached by |\n|---|---|---|---|\n"
+                                      "| settings file | file | - | `load_settings` |\n"
+                                      "| cache.json | file | - | `cache\\.json` |\n"
+                                      "| environment | external | - | `os\\.environ` |\n")
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        fns, objs = trace_objects.objects("lib")
+        s = trace_objects.spec_of(objs, [], "lib", data="DATA.md")
+    finally:
+        os.chdir(cwd)
+    N = {n["id"]: n for n in s["nodes"]}
+    assert N["resource:settings file"]["note"] == "written by no code here"   # loaded, not written
+    assert N["resource:cache.json"]["note"] == "owner: cli.py"               # written through tmp, built from out
+    assert N["resource:environment"]["note"] == "owner: env.py"              # a key assigned; cli.py only reads it
+
+
 def test_a_path_the_owners_public_helper_hands_out_is_reached_through_the_owner(tmp_path):
     import trace_objects
     files = {

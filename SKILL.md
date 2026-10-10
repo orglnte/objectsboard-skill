@@ -1,6 +1,6 @@
 ---
 name: objectsboard
-description: Separation of concerns, encapsulation and abstraction — draw a codebase's objects as the code has them, optionally overlay its concepts, and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact), and refactor round by round: the user decides each next step on the board, the code changes, the board is redrawn from the code. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
+description: Eliminate accidental complexity and make essential complexity explicit, through separation of concerns, encapsulation, abstraction, information hiding, the Information Expert and trust boundaries — draw a codebase's objects as the code has them, optionally overlay its concepts, and review its architecture for patterns, antipatterns and dark concepts, interactively through an Objects Board. Pick one object, extract its whole interface and every outside use, find what goes around it through files, draw the current state on a live Objects Board (a claude.ai artifact), and refactor round by round: the user decides each next step on the board, the code changes, the board is redrawn from the code. Use when the user asks about concepts, separation of concerns, encapsulation, abstraction, who owns a file or a piece of state, an architectural review, or a change would move responsibility between classes or modules.
 ---
 
 # Objectsboard
@@ -10,6 +10,12 @@ goes around each owner, and supports the design round by round: the user
 picks the next change, the code changes, the board is redrawn from the code.
 Encapsulation, abstraction, separation of concerns and ownership are
 design, and the user makes the design.
+
+Its intention is to eliminate accidental complexity and make essential
+complexity explicit, through information hiding, the Information Expert
+pattern, trust boundaries (Secure by Design), encapsulation, abstraction
+and separation of concerns. [PRINCIPLES.md](PRINCIPLES.md) states each
+principle and what the board shows of it today.
 
 A concept map is optional. Concepts say what the software is for; laid over
 the objects they inform the design, but a concept does not translate into a

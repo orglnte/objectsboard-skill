@@ -1184,3 +1184,110 @@ def test_a_subclass_folds_into_the_base_its_file_imports(tmp_path):
     assert "lib/a/text.py:Text" not in N                    # folded into a base, not a box of its own
     assert N["lib/a/base.py:Node"]["members"] == [{"vis": "+", "name": "subclasses: Text"}]
     assert N["lib/b/base.py:Node"]["members"] == []
+
+
+def _tree(root, files):
+    for rel, text in files.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+
+
+def test_an_environment_is_left_out_of_the_scan_without_being_excluded(tmp_path):
+    import pyfiles
+    _tree(tmp_path, {"lib/a.py": "", "lib/__pycache__/a.py": "", "lib/gen/b.py": "", "top.py": "",
+                     ".venv/pyvenv.cfg": "", ".venv/lib/six.py": "", "envs/any/conda-meta/x": "", "envs/any/six.py": ""})
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        assert pyfiles.py_files(".") == [Path("lib/a.py"), Path("lib/gen/b.py"), Path("top.py")]
+        assert pyfiles.py_files(".", ["lib/gen", "top.py"]) == [Path("lib/a.py")]
+        assert pyfiles.py_files("lib") == [Path("lib/a.py"), Path("lib/gen/b.py")]
+    finally:
+        os.chdir(cwd)
+
+
+THROUGH = {
+    "pkg/__init__.py": "",
+    "pkg/a.py": "import helper\nfrom pkg.b import B\n\n\nclass A:\n    def go(self):\n        return helper.call(B().run)\n",
+    "pkg/b.py": "class B:\n    def run(self):\n        return 1\n",
+    "tests/test_a.py": "import sys\nsys.path[:0] = ['.venv/lib', 'vendored']\nfrom pkg.a import A\n\n\n"
+                       "def test_go():\n    assert A().go() == 1\n",
+}
+HELPER = "def call(f):\n    return f()\n"
+
+
+@pytest.mark.parametrize("files, flags", [
+    ({".venv/pyvenv.cfg": "", ".venv/lib/helper.py": HELPER}, []),
+    ({"vendored/helper.py": HELPER}, ["--exclude", "vendored"]),
+])
+def test_a_call_through_code_left_out_of_the_scan_is_charged_to_its_caller(tmp_path, files, flags):
+    _tree(tmp_path, {**THROUGH, **files})
+    out = tmp_path / "objects.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_objects.py"), "--root", ".", "--out", str(out), *flags,
+                    "--", "tests", "-q", "-p", "no:cacheprovider"], cwd=tmp_path, check=True, capture_output=True)
+    d = json.loads(out.read_text())
+    assert d["pytest_exit"] == 0
+    assert {"from": "pkg/a.py:A", "to": "pkg/b.py:B", "members": ["run"], "calls": 1} in d["edges"]
+
+
+def test_trace_uses_charges_a_call_through_an_environment_to_its_caller(tmp_path):
+    _tree(tmp_path, {**THROUGH, ".venv/pyvenv.cfg": "", ".venv/lib/helper.py": HELPER})
+    out = tmp_path / "trace.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_uses.py"), "--target", "pkg/b.py:B", "--out", str(out),
+                    "--", "tests", "-q", "-p", "no:cacheprovider"], cwd=tmp_path, check=True, capture_output=True)
+    assert [(u["file"], u["member"]) for u in json.loads(out.read_text())["uses"]] == [("pkg/a.py", "run")]
+
+
+def test_trace_uses_walks_past_an_environment_that_calls_the_targets_own_file(tmp_path):
+    _tree(tmp_path, {**THROUGH, ".venv/pyvenv.cfg": "", ".venv/lib/helper.py": HELPER,
+                     "pkg/a.py": "import helper\nfrom pkg.b import start\n\n\nclass A:\n    def go(self):\n        return helper.call(start)\n",
+                     "pkg/b.py": "class B:\n    def run(self):\n        return 1\n\n\ndef start():\n    return B().run()\n"})
+    out = tmp_path / "trace.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_uses.py"), "--target", "pkg/b.py:B", "--out", str(out),
+                    "--", "tests", "-q", "-p", "no:cacheprovider"], cwd=tmp_path, check=True, capture_output=True)
+    assert [(u["file"], u["member"]) for u in json.loads(out.read_text())["uses"]] == [("pkg/a.py", "run")]
+
+
+def test_a_call_from_an_excluded_test_is_not_charged_to_the_code_that_called_the_test(tmp_path):
+    _tree(tmp_path, {"pkg/__init__.py": "",
+                     "pkg/a.py": "class A:\n    def go(self, callback):\n        return callback()\n",
+                     "pkg/b.py": "class B:\n    def run(self):\n        return 1\n",
+                     "tests/test_a.py": "from pkg.a import A\nfrom pkg.b import B\n\n\n"
+                                        "def test_go():\n    assert A().go(lambda: None) is None\n    assert A().go(check) == 1\n\n\n"
+                                        "def check():\n    return B().run()\n"})
+    out = tmp_path / "objects.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_objects.py"), "--root", ".", "--out", str(out), "--exclude", "tests",
+                    "--", "tests", "-q", "-p", "no:cacheprovider"], cwd=tmp_path, check=True, capture_output=True)
+    d = json.loads(out.read_text())
+    assert d["pytest_exit"] == 0 and d["edges"] == []
+
+
+CALLBACK = {"pkg/__init__.py": "",
+            "pkg/a.py": "class A:\n    def go(self, callback):\n        return callback()\n",
+            "pkg/b.py": "class B:\n    def run(self):\n        return 1\n",
+            "test/test_a.py": "from pkg.a import A\nfrom pkg.b import B\n\n\n"
+                              "def test_go():\n    assert A().go(check) == 1\n\n\ndef check():\n    return B().run()\n"}
+
+
+def test_an_excluded_test_folder_given_to_pytest_counts_as_test_code(tmp_path):
+    _tree(tmp_path, CALLBACK)
+    out = tmp_path / "objects.json"
+    subprocess.run([sys.executable, str(TOOLS / "trace_objects.py"), "--root", ".", "--out", str(out), "--exclude", "test",
+                    "--", "test", "-q", "-p", "no:cacheprovider"], cwd=tmp_path, check=True, capture_output=True)
+    d = json.loads(out.read_text())
+    assert d["pytest_exit"] == 0 and d["edges"] == []
+
+
+def test_a_pytest_path_holding_scanned_files_stays_project_code(tmp_path):
+    import trace_objects
+    _tree(tmp_path, {"lib/a.py": "", "lib/test_a.py": "", "tests/test_b.py": "", "t/test_c.py": ""})
+    scanned = {str((tmp_path / f).resolve()) for f in ("lib/a.py", "lib/test_a.py")}
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        got = trace_objects.test_paths("tests", ["lib", "t/test_c.py::test_c", "-q", "lib/test_a.py"], scanned)
+    finally:
+        os.chdir(cwd)
+    root = str(tmp_path.resolve())
+    assert set(got) == {root + "/tests/", root + "/t/test_c.py"}

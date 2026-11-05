@@ -36,6 +36,8 @@ test whatever --scan tag it came from.
 """
 import argparse, ast, json, os, pathlib, re, sys
 
+from pyfiles import py_files
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--target", required=True)
 ap.add_argument("--scan", action="append", default=[])
@@ -81,8 +83,8 @@ def module_mode():
     uses = []
     for spec in a.scan:
         tag, base = spec.split("=", 1)
-        for p in sorted(pathlib.Path(base).rglob("*.py")):
-            if "__pycache__" in p.parts or p.resolve() == CFILE:
+        for p in py_files(base):
+            if p.resolve() == CFILE:
                 continue
             try:
                 text = p.read_text(); t = ast.parse(text)
@@ -207,8 +209,8 @@ def instance(v):
 uses = []
 for spec in a.scan:
     tag, base = spec.split("=", 1)
-    for p in sorted(pathlib.Path(base).rglob("*.py")):
-        if "__pycache__" in p.parts or p.resolve() == CFILE:
+    for p in py_files(base):
+        if p.resolve() == CFILE:
             continue
         try:
             text = p.read_text(); t = ast.parse(text)

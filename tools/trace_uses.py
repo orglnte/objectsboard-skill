@@ -32,6 +32,8 @@ the tests start). A caller inside the test files counts as a test.
 import argparse, ast, json, os, sys, threading
 from pathlib import Path
 
+from pyfiles import py_files
+
 
 def targets(cfile, name):
     """{(filename, first line): member} for each function of the target; the
@@ -66,7 +68,7 @@ def run(cfile, cname, pytest_args):
     sys.path.insert(0, os.getcwd())               # as `python -m pytest` does
     want = targets(cfile, cname)
     own = str(Path(cfile).resolve())
-    root = str(Path.cwd().resolve()) + os.sep
+    scanned = {str(p.resolve()) for p in py_files(".")}
     hits = {}
 
     def prof(frame, event, arg):
@@ -77,15 +79,15 @@ def run(cfile, cname, pytest_args):
         if m is None:
             return
         b = frame.f_back
-        while b is not None and not b.f_code.co_filename.startswith(root):
-            b = b.f_back                      # outside the project (contextlib, functools, ...)
+        while b is not None and b.f_code.co_filename not in scanned:
+            b = b.f_back                      # outside the project (contextlib, functools, environments, ...)
         if b is not None and b.f_code.co_filename == own and m.startswith("_") and m != "__init__":
             return                            # a private helper called from the class's own file
         while b is not None:
             bc = b.f_code
             if (bc.co_filename, bc.co_firstlineno) in want:
                 return                        # one of the class's own functions: internal
-            if bc.co_filename != own and bc.co_filename.startswith(root):
+            if bc.co_filename != own and bc.co_filename in scanned:
                 break
             b = b.f_back                      # a wrapper in the class's file, or outside the project
         if b is None:

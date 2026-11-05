@@ -10,7 +10,8 @@ module is an object too). Every function under --root belongs to one: a
 method to its class, a top-level function to its module. The profiler
 records each call from one object into another; calls inside one object are
 not recorded. Closures (decorator wrappers, lambdas) and frames outside the
-project are walked past, so a call is charged to the object that made it.
+scanned files (libraries, environments, excluded folders) are walked past, so
+a call is charged to the object that made it.
 
 --worklist FILE (with --spec) writes the refactoring worklist: private
 access (red) first, then owner bypasses and shared data (amber); one entry
@@ -44,17 +45,16 @@ data reached through a helper that returns its path is its callers'
 import argparse, ast, json, os, re, sys, threading
 from pathlib import Path
 
+import pyfiles
+
 
 EXCLUDE = []                                  # folders left out of every scan (set by main or a caller)
 GROUPS = ("unowned", "resources")             # box kinds that draw boxes together and own nothing
 
 
 def py_files(root):
-    """Every Python file under root, sorted, minus __pycache__ and the
-    folders in EXCLUDE (paths as given, relative to the current folder)."""
-    skip = [Path(e) for e in EXCLUDE]
-    return [p for p in sorted(Path(root).rglob("*.py"))
-            if "__pycache__" not in p.parts and not any(p == e or e in p.parents for e in skip)]
+    """Every Python file under root (pyfiles.py_files), minus the folders in EXCLUDE."""
+    return pyfiles.py_files(root, EXCLUDE)
 
 
 def objects(root):
@@ -86,12 +86,27 @@ def objects(root):
     return fns, objs
 
 
+def test_paths(tests_dir, pytest_args, scanned):
+    """Path prefixes of the test code: tests_dir, and each folder or file pytest
+    is given that holds no scanned file (a test folder left out of the scan). A
+    path holding scanned files is project code, even when pytest runs it."""
+    out = {str(Path(tests_dir).resolve()) + os.sep}
+    for arg in pytest_args:
+        p = Path(arg.split("::")[0])
+        if p.exists():
+            r = str(p.resolve())
+            prefix = r + os.sep if p.is_dir() else r
+            if not any(s.startswith(prefix) for s in scanned):
+                out.add(prefix)
+    return tuple(out)
+
+
 def run(root, pytest_args, tests_dir):
     import pytest
     sys.path.insert(0, os.getcwd())               # as `python -m pytest` does
     fns, objs = objects(root)
-    proj = str(Path.cwd().resolve()) + os.sep
-    tests = str(Path(tests_dir).resolve()) + os.sep
+    scanned = {str(p.resolve()) for p in py_files(root)}
+    tests = test_paths(tests_dir, pytest_args, scanned)
     hits = {}
 
     def prof(frame, event, arg):
@@ -105,9 +120,9 @@ def run(root, pytest_args, tests_dir):
         while b is not None:
             bc = b.f_code
             fn = bc.co_filename
-            if fn.startswith(proj) and "<locals>" not in getattr(bc, "co_qualname", ""):
+            if (fn in scanned or fn.startswith(tests)) and "<locals>" not in getattr(bc, "co_qualname", ""):
                 break
-            b = b.f_back                      # outside the project, or a closure
+            b = b.f_back                      # outside the scanned files, or a closure
         if b is None or b.f_code.co_filename.startswith(tests):
             return
         caller = fns.get((b.f_code.co_filename, b.f_code.co_firstlineno))
@@ -1563,8 +1578,8 @@ PREFS = ".objectsboard.json"
 
 def load_prefs(path=PREFS):
     """The step 0 answers saved in the repo root ({"root_owns", "group_unowned",
-    "group_resources", "data", "concepts", "exclude", "arrows"}); {} when
-    there is none."""
+    "group_resources", "data", "concepts", "exclude", "analyze", "arrows"}); {}
+    when there is none."""
     try:
         with open(path) as f:
             prefs = json.load(f)

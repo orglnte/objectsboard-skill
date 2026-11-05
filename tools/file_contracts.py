@@ -9,7 +9,9 @@ lines of context. A mention is not yet a read or a write: classify each from
 its context (write_text / open("a") / unlink = write; read_text / exists /
 parse = read) before drawing it.
 """
-import argparse, pathlib, re
+import argparse, re
+
+from pyfiles import py_files
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--name", action="append", required=True)
@@ -18,8 +20,8 @@ ap.add_argument("--with-tests", action="store_true")
 a = ap.parse_args()
 for spec in a.root:
     tag, base = spec.split("=", 1)
-    for p in sorted(pathlib.Path(base).rglob("*.py")):
-        if "__pycache__" in p.parts or (not a.with_tests and "/tests/" in str(p)):
+    for p in py_files(base):
+        if not a.with_tests and "/tests/" in str(p):
             continue
         L = p.read_text(errors="replace").splitlines()
         for i, line in enumerate(L, 1):

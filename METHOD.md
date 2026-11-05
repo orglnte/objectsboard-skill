@@ -215,7 +215,10 @@ green, and the board is redrawn before the next owner is decided.
    `--concepts`, optional, names a concept map laid over the boxes, whose
    own Resources table serves when `--data` is not given; `--spec`
    writes the board spec; `--exclude DIR` (repeatable, or `exclude` in
-   `.objectsboard.json`) leaves a folder out of every scan. An arrow the caller's file does not name (a
+   `.objectsboard.json`) leaves a folder out of every scan (a call that passes
+   through one is charged to its caller, as a call through a library is; a
+   test folder left out is recognised as `--tests-dir` or as a path given to
+   pytest, and its calls are not recorded). An arrow the caller's file does not name (a
    subclass, a callback, an injected function) is marked "[run time only]"
    with the observation as proof. A pair the run never saw, where the
    source names a class or function of the other box (followed through
@@ -292,6 +295,17 @@ green, and the board is redrawn before the next owner is decided.
       arrives. Every box has a resize handle at its bottom-right corner
       (always shown on containers and dashed boxes, on hover otherwise).
 
+8. **`survey.py`**: the setup step: the repo's folders as a tree, each
+   `analyze` or `skip` with its reason. Sure verdicts come from what a folder
+   is (a Python environment, no Python, hidden, the tests); `?` marks a guess
+   from what it looks like (its own git repository, a name such as `vendor`
+   or `docs`, files that say they are generated, no file outside importing
+   it), and those are the user's to decide. Saved decisions (`exclude`,
+   `analyze`) are not asked again. `pyfiles.py` is the one file scan every
+   tool uses: it never enters an environment (a folder holding `pyvenv.cfg`
+   or `conda-meta`), so no repo has to exclude one, and the tracers walk past
+   every frame outside the scanned files.
+
 ## What the tools cannot see
 
 Say which of these apply when reporting findings: an absence the tools
@@ -320,7 +334,11 @@ cannot see is not evidence that nothing is there.
 5. **State and actors:** which instance, thread, task, process or session
    makes a call, and any mutable state; the State table, written by hand,
    holds them.
-6. **Everything:** Python only. Other languages need the interface and its
+6. **Survey (`survey.py`):** imports are matched by name, so a folder another
+   package shares its name with reads as imported, and a folder reached only
+   by a command line or a computed import reads as not imported. It lists no
+   folder under a skipped one.
+7. **Everything:** Python only. Other languages need the interface and its
    uses gathered by hand; the method and the board still apply.
 
 ## Keeping the diagrams true

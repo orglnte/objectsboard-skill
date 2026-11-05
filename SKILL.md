@@ -175,13 +175,33 @@ Without any of them, start from the object the user's question is about.
 
 ## Steps
 
-0. Look for `.objectsboard.json` in the repo root first: it holds the
-   answers to this step from an earlier session (`{"data": ..., "concepts":
+0. **Setup, in every session, before anything is traced.** Note whether
+   `.objectsboard.json` is in the repo root: it holds the answers to this
+   step from an earlier session (`{"data": ..., "concepts":
    ..., "root_owns": ..., "group_unowned": ..., "group_resources": ...,
-   "exclude": [folders], "state": file | null,
+   "exclude": [folders], "analyze": [folders], "state": file | null,
    "arrows": "collapsed" | "detailed"}`), and `trace_objects.py` reads it for every option its
-   command line leaves out (`state` is for the skill only). When it is there, show the saved answers in one
-   line, say how to change them (below) and skip the questions. Otherwise,
+   command line leaves out (`state` is for the skill only, `analyze` for the
+   survey). Then, in this order:
+   1. Run `tools/survey.py` from the repo root. It prints the repo as a tree,
+      each folder `analyze` or `skip` with its reason, and the `exclude` list
+      to save: the saved entries and these verdicts. It reads saved `exclude`
+      and `analyze` and writes nothing.
+   2. **Clear** (no `?`): say in one line how many folders are analyzed and
+      which ones holding Python are skipped.
+   3. **Unclear** (a `?` on any folder: a guess from what it looks like, not
+      from what it is): show the whole tree, verbatim, in a turn of its own,
+      and ask for each `?` folder: analyze or skip. Nothing is traced until
+      the user has answered. Add the skipped folders to `exclude` and the
+      others to `analyze`, then run the survey again: a folder now analyzed
+      shows its subfolders, and a new `?` is asked the same way.
+   4. Save: set `exclude` to the list the last survey printed and `analyze`
+      to the user's answers added to what was saved; every other key stays
+      as it is. A saved decision is not asked again; a new folder that gets a
+      `?` is. Python environments are never analyzed and need no entry.
+   5. If the file was there before this step, show the saved answers in one
+      line, say how to change them (below) and skip the questions below.
+      Otherwise,
    ask once whether the repo has a concept map or a Resources table (look
    for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
    Resources table only, so the board has data findings; a concept map,
@@ -201,10 +221,7 @@ Without any of them, start from the object the user's question is about.
       drawn together in one box, the resources group (not an owner; each
       resource keeps its own owner or writers)? Yes runs it with
       `--group-resources`; no leaves each resource box on its own.
-   4. Any folders to leave out (vendored code, generated code, examples)?
-      They go in `exclude` (`--exclude DIR`, paths from the repo root) and
-      are left out of every scan: no box, no arrow, no call traced.
-   5. Should the board come with a State table: one row per piece of
+   4. Should the board come with a State table: one row per piece of
       mutable state, with the key it is kept under, the actors that write
       it (threads, tasks, processes, instances, sessions), its lifecycle
       and the invariant it protects? Say what yes means: the table is
@@ -213,8 +230,8 @@ Without any of them, start from the object the user's question is about.
       data's); it is updated on every redraw. Yes saves its file in
       `state` (the concept map, or `docs/STATE-<repo>.md`); no leaves it
       out.
-   After the questions, write the answers to `.objectsboard.json` in the
-   repo root (never commit it: the user decides whether the repo keeps it
+   After the questions, add the answers to `.objectsboard.json` in the
+   repo root, keeping `exclude` and `analyze` (never commit it: the user decides whether the repo keeps it
    or ignores it) and tell the user how to change them later: say which one
    to change ("turn the unowned group on", "the root class owns its
    package"), or ask to go through the questions again; the file is

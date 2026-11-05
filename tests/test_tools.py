@@ -783,6 +783,228 @@ def test_boxes_with_no_arrows_between_them_are_packed_not_laid_in_a_row():
     assert max(w / h, h / w) <= board.ASPECT
 
 
+def _ring_graph():
+    """Five boxes all linked, one box linked to three of them, two small boxes, one with no link."""
+    core = [f"h{k}" for k in range(5)]
+    edges = [(a, b) for k, a in enumerate(core) for b in core[k + 1:]]
+    edges += [("m", "h0"), ("m", "h1"), ("m", "h2"), ("s1", "h3"), ("s2", "h3"), ("s2", "h4")]
+    ids = sorted(core + ["m", "s1", "s2", "alone"])
+    return ids, {i: (120, 50) for i in ids}, edges
+
+
+def test_shells_put_the_most_linked_boxes_in_the_centre():
+    ids, _, edges = _ring_graph()
+    nb = {i: set() for i in ids}
+    for a, b in edges:
+        nb[a].add(b), nb[b].add(a)
+    keep = [i for i in ids if i not in ("s1", "s2")]
+    assert board._shells(keep, {i: nb[i] - {"s1", "s2"} for i in keep}) == [
+        ["h0", "h1", "h2", "h3", "h4"], ["m"], ["alone"]]
+
+
+def test_a_ring_sits_outside_the_centre_and_small_boxes_beside_their_partners():
+    ids, size, edges = _ring_graph()
+    pos = board._rings(ids, size, edges)
+    R = {i: (*pos[i], *size[i]) for i in ids}
+    assert not any(R[a][0] < R[b][0] + 120 and R[b][0] < R[a][0] + 120 and R[a][1] < R[b][1] + 50 and R[b][1] < R[a][1] + 50
+                   for k, a in enumerate(ids) for b in ids[k + 1:])
+    core = {i: pos[i] for i in ids if i.startswith("h")}
+    x0, y0, x1, y1 = board._extent(core, size)
+    assert pos["m"][0] >= x1 or pos["m"][0] + 120 <= x0 or pos["m"][1] >= y1 or pos["m"][1] + 50 <= y0
+    near = lambda a, b: math.dist(pos[a], pos[b])
+    assert near("s1", "h3") == min(near("s1", j) for j in ids if j != "s1")      # no box nearer than its partner
+    assert min(near("s2", "h3"), near("s2", "h4")) <= 240
+
+
+def test_rings_ignore_the_order_of_the_arrows():
+    ids, size, edges = _ring_graph()
+    assert board._rings(ids, size, edges) == board._rings(ids, size, edges[::-1])
+
+
+def test_a_graph_of_small_boxes_has_no_centre_so_no_rings():
+    ids = ["a", "b", "c"]
+    assert board._rings(ids, {i: (120, 50) for i in ids}, [("a", "b"), ("b", "c")]) is None
+
+
+def _ring_spec():
+    ids, _, edges = _ring_graph()
+    return {"name": "r", "nodes": [_box(i, 0, 0) for i in ids],
+            "edges": [{"from": f, "to": t, "kind": "calls", "label": "", "proof": [{"observed": "run"}]} for f, t in edges]}
+
+
+def _block():
+    """Four boxes marking a square block's sides, 100 wide and high."""
+    return {"l": (0, 200), "r": (400, 200), "t": (200, 0), "b": (200, 400)}
+
+
+def test_a_ring_box_goes_on_the_side_facing_its_neighbour_and_a_follower_with_it():
+    pos, size = _block(), {i: (100, 100) for i in "lrtb"}
+    shell = ["a", "b2", "c", "d", "e"]
+    size.update({i: (80, 40) for i in shell})
+    nb = {"a": {"l"}, "b2": {"r"}, "c": {"t"}, "d": {"b"}, "e": {"a"}}
+    board._around(pos, size, shell, nb, 60)
+    assert pos["a"][0] + 80 <= 0 and pos["e"][0] + 80 <= 0     # e links only to a, so it joins a on the left
+    assert pos["b2"][0] >= 500
+    assert pos["c"][1] + 40 <= 0
+    assert pos["d"][1] >= 500
+    assert board._clear(list(pos), size, pos)
+
+
+def test_a_ring_turns_to_the_long_sides_of_a_wide_block_and_the_short_sides_of_a_tall_one():
+    size = {"p": (100, 100), "q": (100, 100), "a": (80, 40)}
+    wide = {"p": (0, 0), "q": (1000, 0)}
+    board._around(wide, size, ["a"], {"a": {"q"}}, 60)            # dead right of the block's centre, yet above it
+    assert wide["a"][1] + 40 <= 0 or wide["a"][1] >= 100
+    tall = {"p": (0, 0), "q": (0, 500)}
+    board._around(tall, size, ["a"], {"a": {"p"}}, 60)            # above the centre, yet beside the block
+    assert tall["a"][0] + 80 <= 0 or tall["a"][0] >= 100
+
+
+def test_a_small_box_goes_beside_its_partner_on_the_side_away_from_the_block():
+    size = {"p": (100, 100), "o": (100, 100), "s": (80, 40)}
+    pos = {"p": (0, 0), "o": (-1000, 0)}
+    board._beside(pos, size, "s", {"s": {"p"}}, 60)
+    assert 100 < pos["s"][0] <= 220 and -40 < pos["s"][1] < 100
+    pos = {"p": (0, 0), "o": (1000, 0)}
+    board._beside(pos, size, "s", {"s": {"p"}}, 60)
+    assert -200 <= pos["s"][0] < -80 and -40 < pos["s"][1] < 100
+
+
+def test_a_small_box_takes_the_next_free_spot_when_the_side_is_taken():
+    size = {"p": (100, 100), "o": (100, 100), "w": (100, 400), "s": (80, 40)}
+    pos = {"p": (0, 0), "o": (-1000, 0), "w": (150, -150)}
+    board._beside(pos, size, "s", {"s": {"p"}}, 60)
+    assert board._clear(list(pos), size, pos)
+    assert math.dist(pos["s"], pos["p"]) < 300
+
+
+def test_small_boxes_linked_to_each_other_are_placed_too():
+    ids, _, edges = _ring_graph()
+    edges = edges + [("t1", "t2"), ("t2", "h0"), ("u1", "u2")]     # t1 reaches the core through t2; u1 and u2 not at all
+    ids = sorted(ids + ["t1", "t2", "u1", "u2"])
+    size = {i: (120, 50) for i in ids}
+    pos = board._rings(ids, size, edges)
+    assert set(pos) == set(ids) and board._clear(ids, size, pos)
+    assert math.dist(pos["t1"], pos["t2"]) < 300 and math.dist(pos["u1"], pos["u2"]) < 300
+
+
+def test_rings_place_the_small_boxes_last_beside_their_partners(monkeypatch):
+    seen, real = [], board._beside
+    monkeypatch.setattr(board, "_beside", lambda pos, size, i, nb, gap: seen.append((i, set(pos) >= nb[i])) or real(pos, size, i, nb, gap))
+    ids, size, edges = _ring_graph()
+    board._rings(ids, size, edges)
+    assert sorted(seen) == [("s1", True), ("s2", True)]
+
+
+def test_layout_under_rings_keeps_its_rings():
+    d = board.build(_ring_spec(), None, None, fresh=True, strategy="rings")
+    assert all(board.overlaps(d, n["id"]) == [] for n in d["nodes"])
+    assert d == board.build(_ring_spec(), None, None, fresh=True, strategy="rings")
+
+
+def test_only_the_centre_of_rings_is_swapped_and_the_board_pass_swaps_nothing(monkeypatch):
+    seen, swap = [], {}
+    real, refine = board._swap, board.refine
+    monkeypatch.setattr(board, "_swap", lambda ids, *a: seen.append(len(ids)) or real(ids, *a))
+    monkeypatch.setattr(board, "refine", lambda d, kids, swap=True, _r=refine, _s=swap: _s.update(on=swap) or _r(d, kids, swap=swap))
+    board.build(_ring_spec(), None, None, fresh=True, strategy="rings")
+    assert seen and max(seen) == 5 and swap == {"on": False}
+    seen.clear()
+    board.build(_ring_spec(), None, None, fresh=True, strategy="grid")
+    assert max(seen) == 9 and swap == {"on": True}
+
+
+def test_best_tries_every_strategy():
+    assert all(w in board.WAYS["best"] for name, ways in board.WAYS.items() for w in ways)
+    assert set(board.WAYS) == set(board.STRATEGIES)
+
+
+def test_a_strategy_that_cannot_run_stops_and_never_falls_back(monkeypatch):
+    path = {"name": "p", "nodes": [_box(i, 0, 0) for i in "abc"],
+            "edges": [{"from": f, "to": t, "kind": "calls", "label": "", "proof": [{"observed": "run"}]}
+                      for f, t in (("a", "b"), ("b", "c"))]}
+    with pytest.raises(ValueError, match="no box has more than two links"):
+        board.build(path, None, None, fresh=True, strategy="rings")
+    monkeypatch.setattr(board.shutil, "which", lambda _: None)
+    for name in ("layered", "stress", "force"):
+        with pytest.raises(ValueError, match="Graphviz"):
+            board.build(path, None, None, fresh=True, strategy=name)
+    assert board.build(path, None, None, fresh=True)["nodes"]            # best still has the grid
+
+
+@pytest.mark.skipif(not board.shutil.which("sfdp"), reason="Graphviz not installed")
+@pytest.mark.parametrize("name", ["stress", "force", "layered"])
+def test_graphviz_strategies_lay_out_clear_of_overlaps(name):
+    d = board.build(_ring_spec(), None, None, fresh=True, strategy=name)
+    assert all(board.overlaps(d, n["id"]) == [] for n in d["nodes"])
+    assert d == board.build(_ring_spec(), None, None, fresh=True, strategy=name)
+
+
+def test_spring_refuses_a_layout_with_overlaps(monkeypatch):
+    monkeypatch.setattr(board, "_graphviz", lambda *a: {"a": (0, 0), "b": (10, 10)})
+    assert board._spring(["a", "b"], {"a": (100, 50), "b": (100, 50)}, [], "neato") is None
+
+
+def test_placing_measures_the_gap_and_how_far_out_small_boxes_sit():
+    nodes = [_box(k, x, y) for k, x, y in (("h", 0, 0), ("s", 300, 0), ("p", 0, 300), ("q", 300, 300))]
+    for n in nodes:
+        n["w"], n["h"] = 100, 100
+    edges = [("h", "s"), ("h", "p"), ("h", "q"), ("p", "q")]
+    d = {"nodes": nodes, "edges": [{"from": a, "to": b} for a, b in edges]}
+    r = board.placing(d)
+    w, h = board.bounds(d)["h"][2:]
+    assert r["width"] == 300 + w and r["height"] == 300 + h
+    assert r["gap_median"] == r["gap_worst"] == 300 - w        # s, p and q each sit one gap from a partner
+    assert r["out_median"] == pytest.approx(math.hypot(300, 300) / math.hypot(300 + w, 300 + h))
+    assert (r["over"], r["cross"]) == board.clutter(d)
+    line = [_box(k, x, 0) for k, x in (("a", 0), ("b", 2000), ("c", 2500))]
+    w = board.bounds({"nodes": line})["a"][2]
+    two = board.placing({"nodes": line, "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "c"}]})
+    assert two["gap_median"] == 500 - w and two["gap_worst"] == 2000 - w       # b's two links make it small too
+    alone = board.placing({"nodes": [_box("a", 0, 0)], "edges": []})
+    assert alone["gap_median"] is None and alone["out_median"] is None
+
+
+def _run_board(monkeypatch, *argv):
+    monkeypatch.setattr(sys, "argv", ["board.py", *argv])
+    return board.main()
+
+
+def test_strategies_command_lists_each_with_what_it_needs(monkeypatch, capsys):
+    assert _run_board(monkeypatch, "strategies") == 0
+    out = capsys.readouterr().out
+    assert all(line.split()[0] in board.STRATEGIES for line in out.splitlines())
+    assert len(out.splitlines()) == len(board.STRATEGIES) and "needs: Graphviz neato" in out
+
+
+def test_build_takes_a_strategy_and_reports_one_that_cannot_run(monkeypatch, tmp_path, capsys):
+    spec = tmp_path / "s.json"
+    spec.write_text(json.dumps(_ring_spec()))
+    out = tmp_path / "d.json"
+    assert _run_board(monkeypatch, "build", str(spec), "--layout", "--strategy", "rings", "--out", str(out)) == 0
+    assert json.loads(out.read_text()) == board.build(_ring_spec(), None, None, fresh=True, strategy="rings")
+    with pytest.raises(SystemExit):
+        _run_board(monkeypatch, "build", str(spec), "--strategy", "rings", "--out", str(out))   # kept positions have no strategy
+    path = tmp_path / "p.json"
+    path.write_text(json.dumps({"name": "p", "nodes": [_box("a", 0, 0)], "edges": []}))
+    assert _run_board(monkeypatch, "build", str(path), "--layout", "--strategy", "rings", "--out", str(out)) == 1
+    assert "rings cannot run" in capsys.readouterr().err
+
+
+def test_compare_writes_a_diagram_per_strategy_and_a_row_for_each(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(board.shutil, "which", lambda _: None)
+    spec = tmp_path / "s.json"
+    spec.write_text(json.dumps(_ring_spec()))
+    out = tmp_path / "boards"
+    assert _run_board(monkeypatch, "compare", str(spec), "--collapse", "--out-dir", str(out)) == 0
+    printed = capsys.readouterr().out
+    assert sorted(p.name for p in out.iterdir()) == ["grid.json", "rings.json"]
+    assert json.loads((out / "rings.json").read_text())["name"] == "r — collapsed — rings"
+    assert "stress    cannot run: Graphviz" in printed and printed.count("\n") == 6
+    with pytest.raises(SystemExit):
+        _run_board(monkeypatch, "compare", str(spec))
+
+
 OVERLAY_MAP = ("| Concept | Description | Aliases | Objects | Concerns |\n|---|---|---|---|---|\n"
                "| Geometry | shapes | - | `Shape`, `Report` | - |\n| Output | output | - | `Report` | - |\n"
                "| Ghost | nothing | - | `Nowhere` | - |\n\n"

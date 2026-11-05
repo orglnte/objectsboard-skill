@@ -51,8 +51,9 @@ It covers:
    `.venv/bin/python <skill>/tools/trace_uses.py --target ... -- tests -q`:
    that interpreter needs pytest and the project's dependencies. Caller
    names are fully qualified on Python 3.11+.
-3. Optional: Graphviz (`dot` on the PATH) for `board.py build --layout`;
-   without it the layout starts from a grid and crosses more arrows.
+3. Optional: Graphviz (`dot`, `neato` and `sfdp` on the PATH) for the
+   `layered`, `stress` and `force` placing strategies of `board.py`; without
+   it `best` chooses between `rings` and `grid`.
 
 ## The whole codebase: the objects representation (Python)
 
@@ -180,8 +181,8 @@ Without any of them, start from the object the user's question is about.
    step from an earlier session (`{"data": ..., "concepts":
    ..., "root_owns": ..., "group_unowned": ..., "group_resources": ...,
    "exclude": [folders], "analyze": [folders], "state": file | null,
-   "arrows": "collapsed" | "detailed"}`), and `trace_objects.py` reads it for every option its
-   command line leaves out (`state` is for the skill only, `analyze` for the
+   "arrows": "collapsed" | "detailed", "placing": strategy | "compare"}`), and `trace_objects.py` reads it for every option its
+   command line leaves out (`state` and `placing` are for the skill only, `analyze` for the
    survey). Then, in this order:
    1. Run `tools/survey.py` from the repo root. It prints the repo as a tree,
       each folder `analyze` or `skip` with its reason, and the `exclude` list
@@ -200,7 +201,8 @@ Without any of them, start from the object the user's question is about.
       as it is. A saved decision is not asked again; a new folder that gets a
       `?` is. Python environments are never analyzed and need no entry.
    5. If the file was there before this step, show the saved answers in one
-      line, say how to change them (below) and skip the questions below.
+      line, say how to change them (below) and skip the questions below;
+      a file with no `placing` key still gets question 5.
       Otherwise,
    ask once whether the repo has a concept map or a Resources table (look
    for `docs/CONCEPTS-*.md` first). If not, offer three ways to start: a
@@ -230,6 +232,11 @@ Without any of them, start from the object the user's question is about.
       data's); it is updated on every redraw. Yes saves its file in
       `state` (the concept map, or `docs/STATE-<repo>.md`); no leaves it
       out.
+   5. How should the boxes be placed? Run `tools/board.py strategies` and
+      show the list. Stick with one, saved in `placing` (`best`, the default,
+      keeps the least clutter), or compare them at the end, saved as
+      `"compare"`: step 7 then draws the board under each strategy and the
+      user picks.
    After the questions, add the answers to `.objectsboard.json` in the
    repo root, keeping `exclude` and `analyze` (never commit it: the user decides whether the repo keeps it
    or ignores it) and tell the user how to change them later: say which one
@@ -260,17 +267,36 @@ Without any of them, start from the object the user's question is about.
    of that repo inside it; another repo gets its own board. Write the diagram as a spec where every arrow carries its proof (a
    file and a pattern), run `tools/board.py build` (it refuses an unproved
    arrow and keeps the user's positions; a first draw or a redraw uses
-   `--layout`: inside each box, the parts with arrows out on its border
-   facing them, the rest in an aligned grid, same colours together),
+   `--layout --strategy <placing>`: inside each box, the parts with arrows
+   out on its border facing them, the rest in an aligned grid, same colours
+   together),
    seed the result, and
    let the user duplicate it and drag the next change into it. No
    arrows from a container to its own parts: nesting is the ownership. Offer
    both arrow styles and let the user pick: **detailed**, one arrow per call
    or file access, labelled with it; **collapsed** (`board.py collapse`),
    one arrow per pair of boxes with the labels merged, to see who depends on
-   whom. Read their diagram back before proposing code.
+   whom. Read their diagram back before proposing code. With `placing` set
+   to `"compare"`, run `tools/board.py compare SPEC --out-dir DIR`
+   (`--collapse` for collapsed arrows) instead of `build`, show its table,
+   seed each `DIR/<strategy>.json` as its own diagram, and ask which one to
+   keep; save the answer in `placing`.
 8. Refactor toward the target one owner at a time, suites green per commit,
    and redraw the board after each step.
+
+## Placing strategies: `/objectsboard placing`
+
+1. `/objectsboard placing`: run `tools/board.py strategies`, show the list
+   and the saved `placing`.
+2. `/objectsboard placing <strategy>`: save it in `placing`, run `build
+   --layout --strategy <strategy>` and seed the result as a new diagram named
+   after the strategy. Say so if a strategy cannot run; `board.py` stops
+   rather than fall back to another.
+3. `/objectsboard placing compare`: step 7's comparison, then save the pick.
+
+These work from the last spec of this commit; trace again if there is none
+or the code moved. A new placing is always a new diagram, so positions the
+user dragged in another diagram stay as they are.
 
 What each tool cannot see is listed in [METHOD.md](METHOD.md#what-the-tools-cannot-see):
 say so in the findings. The method, the tools, the views and the pitfalls

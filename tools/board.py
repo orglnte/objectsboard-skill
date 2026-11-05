@@ -3,7 +3,9 @@
 
     board.py check    SPEC [--root DIR]
     board.py build    SPEC [--root DIR] [--keep CURRENT.json] [--stamp REV] --out DOC.json
-    board.py build    SPEC --layout [--root DIR] [--stamp REV] --out DOC.json
+    board.py build    SPEC --layout [--strategy NAME] [--root DIR] [--stamp REV] --out DOC.json
+    board.py strategies
+    board.py compare  SPEC [--root DIR] [--stamp REV] [--collapse] --out-dir DIR
     board.py crossings DOC
     board.py collapse DOC  --out COLLAPSED.json
     board.py simplify DOC  --out SIMPLE.json
@@ -38,15 +40,29 @@ build   check, then lay out: a node already in --keep (the diagram as the
         purple, grey, data), each part stretched to its row's height and its
         column's width so they line up. The top level is one graph of
         fixed-size blocks, by Graphviz `dot` when it is installed (both
-        directions, with and without packing) and a grid; of those no larger
-        than COMPACT times the smallest and no longer than ASPECT to one, the
-        one with the fewest arrows over a box, then crossing arrows, is kept;
-        then top-level blocks swap places wherever that lowers them, and
-        each box's inside is mirrored where that does. Deterministic: the same spec gives
+        directions, with and without packing), a grid, and rings; of those no
+        larger than COMPACT times the smallest and no longer than ASPECT to
+        one, the one with the fewest arrows over a box, then crossing arrows,
+        is kept; then top-level blocks swap places wherever that lowers them
+        (not in rings, where a swap would take a box out of its ring), and
+        each box's inside is mirrored where that does. Rings: the blocks of
+        most links in the centre, each k-core shell one ring further out on
+        the side facing its neighbours, and a block of one or two links last,
+        in the nearest free spot beside them. Deterministic: the same spec gives
         the same layout. Each trial recounts the clutter, so the swaps are
         skipped on a level of more than SWAP_LIMIT boxes, and the whole-board
         pass (mirror and swap) on a board of more than REFINE_LIMIT arrows:
         a big codebase keeps the Graphviz (or grid) layout as it is.
+strategies  the placing strategies --strategy takes: what each does, and
+        what it needs. The default, `best`, tries them all and keeps the one
+        with the least clutter. A strategy that cannot run stops with an
+        error, it never falls back to another.
+compare  build the board under every strategy, write DIR/<strategy>.json
+        (each diagram named after its strategy; --collapse first merges the
+        arrows) and print one row per strategy: the clutter, the board's
+        size, and for the boxes of one or two links the gap to their nearest
+        partner (median and worst) and how far out they sit (0 the centre,
+        1 a corner).
 crossings  the layout's clutter, as the page draws it (straight arrows
         between box centres, clipped at the borders): pairs of arrows that
         cross, and arrows that pass over a box that is neither end nor holds
@@ -67,6 +83,19 @@ SWAP_LIMIT = 40                               # siblings: pairs to try grow with
 REFINE_LIMIT = 500                            # arrows: one whole-board clutter count grows with the square
 COMPACT = 1.5                                 # a top-level layout at most this times the smallest one
 ASPECT = 3                                    # ... and no longer than this to one
+SHAPE = 1.6                                   # a ring turns to the short sides of a block wider than this to one
+WAYS = {"layered": [("TB", False), ("LR", False), ("TB", True), ("LR", True)], "grid": ["grid"],
+        "rings": ["rings"], "stress": ["neato"], "force": ["sfdp"]}
+WAYS["best"] = [w for ways in WAYS.values() for w in ways]
+STRATEGIES = {                                # name: (what it does, what it needs)
+    "best": ("every strategy below that can run; the fewest arrows over a box, then crossings", "nothing"),
+    "rings": ("concentric rings by k-core: the most linked boxes in the centre, boxes of one or two links "
+              "beside their partners", "nothing"),
+    "layered": ("rows in call order, callers before callees (Sugiyama)", "Graphviz dot"),
+    "stress": ("boxes as far apart as the arrows between them say (stress majorisation)", "Graphviz neato"),
+    "force": ("arrows as springs, boxes pushing apart (force-directed)", "Graphviz sfdp"),
+    "grid": ("rows in connection order, most connected first", "nothing"),
+}
 
 
 # --- geometry: the board page's own box sizes --------------------------------
@@ -216,7 +245,7 @@ def nudge(d, i, step=30, rings=40):
     return False
 
 
-def build(spec, keep, stamp, fresh=False):
+def build(spec, keep, stamp, fresh=False, strategy="best"):
     old = {n["id"]: n for n in (keep or {}).get("nodes", [])}
     old = {i: n for i, n in old.items()
            if n.get("parent") == next((m.get("parent") for m in spec["nodes"] if m["id"] == i), None)}
@@ -291,7 +320,7 @@ def build(spec, keep, stamp, fresh=False):
         return k
 
     if fresh:
-        return layout(d)
+        return layout(d, strategy)
     # inner boxes first (they make their owner's size), then the top level
     for i in sorted(byid, key=lambda i: (-depth(i), bounds(d)[i][2] * bounds(d)[i][3])):
         if overlaps(d, i):
@@ -375,23 +404,13 @@ def clutter(d):
     return over, x
 
 
-def _dot(ids, size, edges, rankdir, pack=False):
-    """{id: (x, y)} top-left positions from Graphviz dot, or None."""
-    exe = shutil.which("dot")
+def _graphviz(engine, text, ids, size):
+    """{id: (x, y)} top-left positions from a Graphviz engine, or None."""
+    exe = shutil.which(engine)
     if not exe:
         return None
-    q = lambda s: '"' + s.replace('"', '\\"') + '"'
-    lines = [f"digraph g {{ rankdir={rankdir}; nodesep=0.6; ranksep=0.8; ordering=out;"
-             + (' pack=true; packmode="array_u";' if pack else ""),
-             "node [shape=box, fixedsize=true, label=\"\"];"]
-    for i in ids:
-        w, h = size[i]
-        lines.append(f"{q(i)} [width={w / 72:.3f}, height={h / 72:.3f}];")
-    for a, b in edges:
-        lines.append(f"{q(a)} -> {q(b)};")
-    lines.append("}")
     try:
-        r = subprocess.run([exe, "-Tjson"], input="\n".join(lines), capture_output=True, text=True, timeout=120)
+        r = subprocess.run([exe, "-Tjson"], input=text, capture_output=True, text=True, timeout=120)
         g = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -403,6 +422,37 @@ def _dot(ids, size, edges, rankdir, pack=False):
             w, h = size[o["name"]]
             pos[o["name"]] = (cx - w / 2, (top - cy) - h / 2)
     return pos if len(pos) == len(ids) else None
+
+
+def _quote(s):
+    return '"' + s.replace('"', '\\"') + '"'
+
+
+def _nodes(ids, size):
+    return [f"{_quote(i)} [width={size[i][0] / 72:.3f}, height={size[i][1] / 72:.3f}];" for i in ids]
+
+
+def _dot(ids, size, edges, rankdir, pack=False):
+    lines = [f"digraph g {{ rankdir={rankdir}; nodesep=0.6; ranksep=0.8; ordering=out;"
+             + (' pack=true; packmode="array_u";' if pack else ""),
+             "node [shape=box, fixedsize=true, label=\"\"];"] + _nodes(ids, size)
+    lines += [f"{_quote(a)} -> {_quote(b)};" for a, b in edges]
+    return _graphviz("dot", "\n".join(lines + ["}"]), ids, size)
+
+
+def _clear(ids, size, pos):
+    R = {i: (*pos[i], *size[i]) for i in ids}
+    return not any(R[a][0] < R[b][0] + R[b][2] and R[b][0] < R[a][0] + R[a][2]
+                   and R[a][1] < R[b][1] + R[b][3] and R[b][1] < R[a][1] + R[a][3]
+                   for k, a in enumerate(ids) for b in ids[k + 1:])
+
+
+def _spring(ids, size, edges, engine):
+    """neato or sfdp; None if the build of Graphviz cannot remove the overlaps."""
+    lines = ['graph g { overlap=prism; sep="+30"; node [shape=box, fixedsize=true, label=""];'] + _nodes(ids, size)
+    lines += [f"{_quote(a)} -- {_quote(b)};" for a, b in edges]
+    pos = _graphviz(engine, "\n".join(lines + ["}"]), ids, size)
+    return pos if pos and _clear(ids, size, pos) else None
 
 
 def _grid(ids, size, edges, gap=60):
@@ -442,6 +492,155 @@ def _level_score(ids, size, pos, edges):
     x = sum(1 for k, s in enumerate(segs) for t in segs[k + 1:]
             if not ({s[0], s[1]} & {t[0], t[1]}) and _cross(s[2], s[3], t[2], t[3]))
     return sum(1 for s in segs for j, r in B.items() if j not in (s[0], s[1]) and _hits(s[2], s[3], r)), x
+
+
+def _swap(ids, size, pos, edges):
+    """Swap two siblings wherever that lowers the count, until none does."""
+    better = True
+    while better:
+        better = False
+        score = _level_score(ids, size, pos, edges)
+        for k, a in enumerate(ids):
+            for b in ids[k + 1:]:
+                trial = dict(pos)
+                trial[a], trial[b] = pos[b], pos[a]
+                R = {i: (trial[i][0], trial[i][1], *size[i]) for i in ids}
+                if any(R[i][0] < R[j][0] + R[j][2] and R[j][0] < R[i][0] + R[i][2]
+                       and R[i][1] < R[j][1] + R[j][3] and R[j][1] < R[i][1] + R[i][3]
+                       for i in (a, b) for j in ids if j != i):
+                    continue
+                s2 = _level_score(ids, size, trial, edges)
+                if s2 < score:
+                    pos, score, better = trial, s2, True
+    return pos
+
+
+def _shells(ids, nb):
+    """The k-core shells of ids, centre first: peel the boxes with at most k
+    neighbours left, then k + 1, each k one shell."""
+    left, shells, k = set(ids), [], 0
+    while left:
+        shell, peel = [], True
+        while peel:
+            peel = [i for i in sorted(left) if len(nb[i] & left) <= k]
+            shell += peel
+            left -= set(peel)
+        if shell:
+            shells.insert(0, shell)
+        k += 1
+    return shells
+
+
+def _extent(pos, size):
+    return (min(p[0] for p in pos.values()), min(p[1] for p in pos.values()),
+            max(pos[i][0] + size[i][0] for i in pos), max(pos[i][1] + size[i][1] for i in pos))
+
+
+def _middle(ends):
+    return sum(e[0] for e in ends) / len(ends), sum(e[1] for e in ends) / len(ends)
+
+
+def _around(pos, size, shell, nb, gap):
+    """One ring round the block in pos: each box on the side facing its
+    neighbours, as close to them along that side as the others leave room."""
+    x0, y0, x1, y1 = _extent(pos, size)
+    cx, cy, w, h = (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0
+    mid = lambda i: (pos[i][0] + size[i][0] / 2, pos[i][1] + size[i][1] / 2)
+    want = {}
+    for i in shell:
+        ends = [mid(j) for j in sorted(nb[i]) if j in pos]
+        if ends:
+            want[i] = _middle(ends)
+    for i in shell:
+        if i not in want:
+            ends = [want[j] for j in sorted(nb[i]) if j in want]
+            want[i] = _middle(ends) if ends else (cx, y0)
+    sides = {"left": [], "right": [], "top": [], "bottom": []}
+    for i in shell:
+        dx, dy = (want[i][0] - cx) / w, (want[i][1] - cy) / h
+        if w > SHAPE * h or (abs(dy) > abs(dx) and h <= w):
+            sides["bottom" if dy > 0 else "top"].append(i)
+        else:
+            sides["right" if dx > 0 else "left"].append(i)
+    for sd in ("left", "right"):
+        col = sorted(sides[sd], key=lambda i: want[i][1])
+        y = y0
+        for i in col:
+            y = max(y, want[i][1] - size[i][1] / 2)
+            pos[i] = (x0 - gap - size[i][0] if sd == "left" else x1 + gap, y)
+            y += size[i][1] + gap
+    x0, y0, x1, y1 = _extent(pos, size)
+    for sd in ("top", "bottom"):
+        todo = sorted(sides[sd], key=lambda i: want[i][0])
+        edge = y0 if sd == "top" else y1
+        while todo:                           # rows no wider than the block, wrapped outwards
+            row, used = [], 0
+            while todo and (not row or used + size[todo[0]][0] + gap <= x1 - x0):
+                used += size[todo[0]][0] + gap
+                row.append(todo.pop(0))
+            tall = max(size[i][1] for i in row)
+            top = edge - gap - tall if sd == "top" else edge + gap
+            x, slack = x0, max(0, x1 - x0 - used + gap)
+            for i in row:
+                shift = min(slack, max(0, want[i][0] - size[i][0] / 2 - x))
+                x += shift
+                slack -= shift
+                pos[i] = (x, top + (tall - size[i][1] if sd == "top" else 0))
+                x += size[i][0] + gap
+            edge = top if sd == "top" else top + tall
+
+
+FAN = (0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180)
+
+
+def _beside(pos, size, i, nb, gap):
+    """i in the nearest free spot round the middle of its neighbours, looking
+    away from the block's centre first, so it stays by them and on the outside."""
+    x0, y0, x1, y1 = _extent(pos, size)
+    mid = lambda j: (pos[j][0] + size[j][0] / 2, pos[j][1] + size[j][1] / 2)
+    tx, ty = _middle([mid(j) for j in sorted(nb[i]) if j in pos])
+    out = math.atan2(ty - (y0 + y1) / 2, tx - (x0 + x1) / 2)
+    w, h = size[i]
+    far = math.hypot(x1 - x0, y1 - y0) + math.hypot(w, h)
+    r = 0
+    while r <= far:
+        r += gap
+        for deg in FAN:
+            a = out + math.radians(deg)
+            x, y = tx + r * math.cos(a) - w / 2, ty + r * math.sin(a) - h / 2
+            if not any(x - gap / 2 < p[0] + size[j][0] and p[0] - gap / 2 < x + w
+                       and y - gap / 2 < p[1] + size[j][1] and p[1] - gap / 2 < y + h for j, p in pos.items()):
+                pos[i] = (x, y)
+                return
+
+
+def _rings(ids, size, edges, gap=60):
+    """Concentric rings: the boxes of most links in the centre, each k-core
+    shell one ring further out, on the side facing its neighbours; a box of
+    one or two links last, beside them. {id: (x, y)}, or None when no box has
+    more than two links, so there is no centre."""
+    nb = {i: set() for i in ids}
+    for a, b in edges:
+        nb[a].add(b)
+        nb[b].add(a)
+    small = sorted((i for i in ids if 0 < len(nb[i]) <= 2), key=lambda i: (-size[i][0] * size[i][1], i))
+    rest = {i: nb[i] - set(small) for i in ids if i not in small}
+    if not any(nb[i] for i in rest):
+        return None
+    centre, *shells = _shells(rest, rest)
+    inner = [e for e in edges if e[0] in centre and e[1] in centre]
+    pos = _swap(centre, size, _grid(centre, size, inner, gap), inner)
+    for shell in shells:
+        _around(pos, size, shell, rest, gap)
+    while small:
+        i = next((i for i in small if nb[i] & set(pos)), None)
+        if i:
+            _beside(pos, size, i, nb, gap)
+        else:                                 # small boxes linked only to each other start a spot of their own
+            i = small[0]
+            _around(pos, size, [i], nb, gap)
+        small.remove(i)
+    return pos
 
 
 def colour(n):
@@ -534,11 +733,12 @@ def _ring(ids, size, outer, key, prefer, gap=30):
     return pos, cell
 
 
-def layout(d):
-    """Lay d out from scratch for the least clutter; returns d. Twice: the
+def layout(d, strategy="best"):
+    """Lay d out from scratch under a strategy of WAYS; returns d. Twice: the
     first pass shows where each part's arrows go, the second puts each
-    part that has arrows leaving its box on the side facing them."""
-    chosen = {}
+    part that has arrows leaving its box on the side facing them. ValueError
+    when the strategy cannot run on this diagram."""
+    chosen = {"ways": WAYS[strategy]}
     _layout(d, {}, chosen)
     N = {n["id"]: n for n in d["nodes"]}
     B = bounds(d)
@@ -613,10 +813,15 @@ def _layout(d, prefer, chosen):
         for a, b in edges:
             group[root(a)] = root(b)
         pieces = len({root(i) for i in ids})
-        ways = [w for w in [("TB", False), ("LR", False), ("TB", True), ("LR", True), "grid"]
-                if (w == "grid" or not w[1] or pieces > 1) and (chosen.get("way") in (None, w))]
-        made = {w: _grid(ids, size, edges) if w == "grid" else _dot(ids, size, edges, *w) for w in ways}
-        made = {w: p for w, p in made.items() if p} or {"grid": _grid(ids, size, edges)}
+        ways = [w for w in chosen["ways"]
+                if (isinstance(w, str) or not w[1] or pieces > 1) and (chosen.get("way") in (None, w))]
+        make = {"grid": lambda: _grid(ids, size, edges), "rings": lambda: _rings(ids, size, edges),
+                "neato": lambda: _spring(ids, size, edges, "neato"), "sfdp": lambda: _spring(ids, size, edges, "sfdp")}
+        made = {w: make[w]() if isinstance(w, str) else _dot(ids, size, edges, *w) for w in ways}
+        made = {w: p for w, p in made.items() if p}
+        if not made:
+            raise ValueError("Graphviz is missing or failed" if chosen["ways"] != WAYS["rings"]
+                             else "no box has more than two links, so rings have no centre")
         cands = list(made.values())
 
         def box(p):
@@ -627,22 +832,8 @@ def _layout(d, prefer, chosen):
         fit = [p for p in cands if box(p)[0] <= COMPACT * least and box(p)[1] <= ASPECT] or [min(cands, key=lambda p: box(p)[0])]
         pos = min(fit, key=lambda p: _level_score(ids, size, p, edges))
         chosen["way"] = next(w for w, p in made.items() if p is pos)
-        better = True
-        while better and len(ids) <= SWAP_LIMIT:   # swap two siblings when it lowers the count
-            better = False
-            score = _level_score(ids, size, pos, edges)
-            for k, a in enumerate(ids):
-                for b in ids[k + 1:]:
-                    trial = dict(pos)
-                    trial[a], trial[b] = pos[b], pos[a]
-                    R = {i: (trial[i][0], trial[i][1], *size[i]) for i in ids}
-                    if any(R[i][0] < R[j][0] + R[j][2] and R[j][0] < R[i][0] + R[i][2]
-                           and R[i][1] < R[j][1] + R[j][3] and R[j][1] < R[i][1] + R[i][3]
-                           for i in (a, b) for j in ids if j != i):
-                        continue
-                    s2 = _level_score(ids, size, trial, edges)
-                    if s2 < score:
-                        pos, score, better = trial, s2, True
+        if chosen["way"] != "rings" and len(ids) <= SWAP_LIMIT:   # a swap would take a box out of its ring
+            pos = _swap(ids, size, pos, edges)
         x0 = min((pos[i][0] for i in ids), default=0)
         y0 = min((pos[i][1] for i in ids), default=0)
         rel[parent] = {i: (pos[i][0] - x0, pos[i][1] - y0) for i in ids}
@@ -664,11 +855,11 @@ def _layout(d, prefer, chosen):
 
     put(None, 0, 0)
     if len(d["edges"]) <= REFINE_LIMIT:
-        refine(d, kids)
+        refine(d, kids, swap=chosen["way"] != "rings")
     return d
 
 
-def refine(d, kids):
+def refine(d, kids, swap=True):
     """On the whole board, where arrows leaving a box count too: mirror each
     box's inside, and swap two sibling boxes, whenever that lowers the
     clutter (arrows over a box first, then crossings). Fixed order, so
@@ -701,7 +892,7 @@ def refine(d, kids):
                 else:
                     for i, (dx, dy) in moves.items():
                         move_tree(d, i, -dx, -dy)
-            for k, a in enumerate(ids if parent is None and len(ids) <= SWAP_LIMIT else []):
+            for k, a in enumerate(ids if swap and parent is None and len(ids) <= SWAP_LIMIT else []):
                 for b in ids[k + 1:]:
                     B = bounds(d)
                     da = (B[b][0] - B[a][0], B[b][1] - B[a][1])
@@ -713,6 +904,75 @@ def refine(d, kids):
                     else:
                         move_tree(d, a, -da[0], -da[1])
                         move_tree(d, b, *da)
+
+
+def placing(d):
+    """How a layout reads: {over, cross, width, height, gap_median, gap_worst,
+    out_median}. gap: from a top-level box of one or two links to its nearest
+    partner; out: how far from the board's centre it sits, 1 at a corner.
+    The last three are None on a board with no such box."""
+    N = {n["id"]: n for n in d["nodes"]}
+    B = bounds(d)
+
+    def top(i):
+        while N[i].get("parent") in N:
+            i = N[i]["parent"]
+        return i
+    tops = sorted(i for i in N if N[i].get("parent") not in N)
+    nb = {i: set() for i in tops}
+    for e in d["edges"]:
+        if e["from"] in N and e["to"] in N and top(e["from"]) != top(e["to"]):
+            nb[top(e["from"])].add(top(e["to"]))
+            nb[top(e["to"])].add(top(e["from"]))
+
+    def gap(a, b):
+        return math.hypot(max(b[0] - a[0] - a[2], a[0] - b[0] - b[2], 0), max(b[1] - a[1] - a[3], a[1] - b[1] - b[3], 0))
+    x0, y0 = min(B[i][0] for i in tops), min(B[i][1] for i in tops)
+    x1, y1 = max(B[i][0] + B[i][2] for i in tops), max(B[i][1] + B[i][3] for i in tops)
+    over, cross = clutter(d)
+    small = [i for i in tops if 0 < len(nb[i]) <= 2]
+    gaps = sorted(min(gap(B[i], B[j]) for j in nb[i]) for i in small)
+    half = math.hypot(x1 - x0, y1 - y0) / 2
+    outs = sorted(math.hypot(B[i][0] + B[i][2] / 2 - (x0 + x1) / 2, B[i][1] + B[i][3] / 2 - (y0 + y1) / 2) / half
+                  for i in small)
+    return {"over": over, "cross": cross, "width": x1 - x0, "height": y1 - y0,
+            "gap_median": gaps[len(gaps) // 2] if gaps else None, "gap_worst": gaps[-1] if gaps else None,
+            "out_median": outs[len(outs) // 2] if outs else None}
+
+
+def compare(spec, stamp, out_dir, collapsed=False):
+    """Build the board under every strategy into out_dir; {strategy: placing(d)
+    or the reason it could not run}."""
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    rows = {}
+    for name in STRATEGIES:
+        if name == "best":
+            continue
+        try:
+            d = build(spec, None, stamp, fresh=True, strategy=name)
+        except ValueError as e:
+            rows[name] = str(e)
+            continue
+        d = collapse(d) if collapsed else d
+        d["name"] += f" — {name}"
+        json.dump(d, open(out / f"{name}.json", "w"), indent=1)
+        rows[name] = placing(d)
+    return rows
+
+
+def render_compare(rows):
+    fmt = "{:<9} {:>5} {:>7} {:>13} {:>10} {:>10} {:>5}"
+    lines = [fmt.format("strategy", "over", "crosses", "board", "gap median", "gap worst", "out")]
+    for name, r in rows.items():
+        if isinstance(r, str):
+            lines.append(f"{name:<9} cannot run: {r}")
+            continue
+        none = lambda v, f: "-" if v is None else f.format(v)
+        lines.append(fmt.format(name, r["over"], r["cross"], f"{r['width']:.0f} x {r['height']:.0f}",
+                                none(r["gap_median"], "{:.0f}"), none(r["gap_worst"], "{:.0f}"),
+                                none(r["out_median"], "{:.2f}")))
+    return "\n".join(lines)
 
 
 # --- simplify -------------------------------------------------------------------
@@ -771,14 +1031,27 @@ def simplify(d):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["check", "build", "crossings", "collapse", "simplify"])
-    ap.add_argument("src")
+    ap.add_argument("cmd", choices=["check", "build", "strategies", "compare", "crossings", "collapse", "simplify"])
+    ap.add_argument("src", nargs="?")
     ap.add_argument("--root", default=".")
     ap.add_argument("--keep")
     ap.add_argument("--stamp")
     ap.add_argument("--out")
     ap.add_argument("--layout", action="store_true")
+    ap.add_argument("--strategy", choices=list(STRATEGIES), default="best")
+    ap.add_argument("--collapse", action="store_true")
+    ap.add_argument("--out-dir")
     a = ap.parse_args()
+    if a.cmd == "strategies":
+        for name, (what, needs) in STRATEGIES.items():
+            print(f"{name:<8} {what} (needs: {needs})")
+        return 0
+    if not a.src:
+        ap.error(f"{a.cmd} needs a file")
+    if a.strategy != "best" and not (a.cmd == "build" and a.layout):
+        ap.error("--strategy goes with build --layout")
+    if a.cmd == "compare" and not a.out_dir:
+        ap.error("compare needs --out-dir")
     doc = json.load(open(a.src))
     if a.cmd == "crossings":
         x, over = crossings(doc.get("data", doc))
@@ -794,9 +1067,15 @@ def main():
     if bad:
         return 1
     print(f"{len(doc['edges'])} arrows proved", file=sys.stderr)
+    if a.cmd == "compare":
+        print(render_compare(compare(doc, a.stamp, a.out_dir, a.collapse)))
     if a.cmd == "build":
         keep = json.load(open(a.keep)) if a.keep and not a.layout else None
-        d = build(doc, keep.get("data", keep) if keep else None, a.stamp, fresh=a.layout)
+        try:
+            d = build(doc, keep.get("data", keep) if keep else None, a.stamp, fresh=a.layout, strategy=a.strategy)
+        except ValueError as e:
+            print(f"{a.strategy} cannot run: {e}", file=sys.stderr)
+            return 1
         json.dump(d, open(a.out, "w"), indent=1)
     return 0
 

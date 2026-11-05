@@ -31,7 +31,8 @@ see".
    `.venv/bin/python ~/code/objectsboard-skill/tools/trace_uses.py ...`);
    that interpreter needs pytest and the project's dependencies; so does
    `tools/trace_objects.py`.
-3. Optional: Graphviz (`dot`) for `tools/board.py build --layout`.
+3. Optional: Graphviz (`dot`, `neato`, `sfdp`) for three of the placing
+   strategies of `tools/board.py`.
 
 ## Install
 
@@ -73,7 +74,8 @@ Then `/objectsboard` in Claude Code.
    page (the class as pseudo code, each caller and why it calls).
 10. `tools/board.py`: checks every arrow's proof against the code, lays a
    diagram out keeping the board's existing positions or, with `--layout`,
-   from scratch for the fewest arrows over a box, then crossings, refuses an arrow into
+   from scratch under a placing strategy (`strategies` lists them, `compare`
+   builds the board under each), refuses an arrow into
    a box's own parts, collapses arrows to one per pair of boxes, and makes the
    simplified view.
 11. `tools/objects-board.html`: the board, published as a claude.ai artifact

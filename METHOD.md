@@ -250,9 +250,14 @@ green, and the board is redrawn before the next owner is decided.
    in a grid in the middle, the parts arrows leave from on the border
    facing those arrows, same colours together, every part stretched so
    rows and columns line up; the top level by Graphviz `dot` when
-   installed, and a grid, the compact candidate with the fewest arrows
-   over a box, then crossings, kept; then top-level boxes swapped and
-   insides mirrored while that lowers them; deterministic); `crossings`
+   installed, a grid, and rings (the boxes of most links in the centre,
+   each k-core shell one ring further out, a box of one or two links last,
+   beside what it links to), the compact candidate with the fewest arrows
+   over a box, then crossings, kept; then top-level boxes swapped, except
+   in rings, and insides mirrored while that lowers them; deterministic);
+   `--strategy` picks one placing, `strategies` lists them, and `compare`
+   builds the board under each and prints a table to choose from;
+   `crossings`
    counts the arrows that cross and the arrows over a box;
    `collapse` merges the arrows per pair of boxes; `simplify` makes the
    simplified view. `check` also refuses an arrow
